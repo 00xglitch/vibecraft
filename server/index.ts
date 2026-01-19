@@ -423,11 +423,21 @@ function pollTokens(tmuxSession: string): void {
 
       debug(`Tokens updated: ${tokens} (cumulative: ${session.cumulative})`)
 
+      // Find managed session ID for this tmux session
+      let managedSessionId: string | undefined
+      for (const [id, ms] of managedSessions) {
+        if (ms.tmuxSession === tmuxSession) {
+          managedSessionId = id
+          break
+        }
+      }
+
       // Broadcast token update
       broadcast({
         type: 'tokens',
         payload: {
           session: tmuxSession,
+          sessionId: managedSessionId,
           current: tokens,
           cumulative: session.cumulative,
         },

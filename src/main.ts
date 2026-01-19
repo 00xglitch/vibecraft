@@ -254,6 +254,11 @@ function renderManagedSessions(): void {
       ? (lastPrompt.length > 35 ? lastPrompt.slice(0, 32) + '...' : lastPrompt)
       : null
 
+    // Token display (if available)
+    const tokenDisplay = session.tokens
+      ? `<div class="session-tokens">⚡ ${formatTokens(session.tokens.current)}</div>`
+      : ''
+
     // Build detailed tooltip
     const tooltipParts = [
       `Name: ${session.name}`,
@@ -262,6 +267,7 @@ function renderManagedSessions(): void {
       session.claudeSessionId ? `Claude ID: ${session.claudeSessionId.slice(0, 12)}...` : 'Not linked yet',
       session.cwd ? `Dir: ${session.cwd}` : '',
       session.lastActivity ? `Last active: ${new Date(session.lastActivity).toLocaleString()}` : '',
+      session.tokens ? `Tokens: ${session.tokens.current.toLocaleString()} current, ${session.tokens.cumulative.toLocaleString()} total` : '',
       lastPrompt ? `Last prompt: ${lastPrompt}` : '',
     ].filter(Boolean)
     el.title = tooltipParts.join('\n')
@@ -272,6 +278,7 @@ function renderManagedSessions(): void {
       <div class="session-info">
         <div class="session-name">${escapeHtml(session.name)}</div>
         <div class="${detailClass}">${detail}${!needsAttention && session.status !== 'offline' && lastActive ? ` · ${lastActive}` : ''}</div>
+        ${tokenDisplay}
         ${truncatedPrompt ? `<div class="session-prompt">💬 ${escapeHtml(truncatedPrompt)}</div>` : ''}
       </div>
       <div class="session-actions">
@@ -2684,6 +2691,15 @@ function init() {
     if (tokenCounter) {
       tokenCounter.textContent = `⚡ ${formatTokens(data.cumulative)}`
       tokenCounter.title = `${data.cumulative.toLocaleString()} tokens used`
+    }
+
+    // Update managed session tokens if sessionId is provided
+    if (data.sessionId) {
+      const session = state.managedSessions.find(s => s.id === data.sessionId)
+      if (session) {
+        session.tokens = { current: data.current, cumulative: data.cumulative }
+        renderManagedSessions()
+      }
     }
   })
 
