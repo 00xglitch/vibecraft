@@ -327,6 +327,9 @@ function loadDeepgramKey(): string | null {
 /** Map Claude Code session IDs to our managed session IDs */
 const claudeToManagedMap = new Map<string, string>()
 
+/** Reverse lookup: tmux session name -> managed session ID (avoids linear search in pollTokens) */
+const tmuxToManagedMap = new Map<string, string>()
+
 /** Counter for generating session names */
 let sessionCounter = 0
 
@@ -423,14 +426,8 @@ function pollTokens(tmuxSession: string): void {
 
       debug(`Tokens updated: ${tokens} (cumulative: ${session.cumulative})`)
 
-      // Find managed session ID for this tmux session
-      let managedSessionId: string | undefined
-      for (const [id, ms] of managedSessions) {
-        if (ms.tmuxSession === tmuxSession) {
-          managedSessionId = id
-          break
-        }
-      }
+      // Find managed session ID for this tmux session (O(1) lookup via reverse map)
+      const managedSessionId = tmuxToManagedMap.get(tmuxSession)
 
       // Broadcast token update
       broadcast({
@@ -833,6 +830,7 @@ function createSession(options: CreateSessionRequest = {}): Promise<ManagedSessi
       }
 
       managedSessions.set(id, session)
+      tmuxToManagedMap.set(tmuxSession, id)
       log(`Created session: ${name} (${id.slice(0, 8)}) -> tmux:${tmuxSession} cmd:'${claudeCmd}'`)
 
       // Track git status for this session
@@ -913,6 +911,7 @@ function deleteSession(id: string): Promise<boolean> {
         log(`Warning: Failed to kill tmux session: ${error.message}`)
       }
 
+      tmuxToManagedMap.delete(session.tmuxSession)
       managedSessions.delete(id)
       gitStatusManager.untrack(id)
       // Clean up mapping
@@ -1049,6 +1048,10 @@ function loadSessions(): void {
         session.status = 'offline'
         session.currentTool = undefined
         managedSessions.set(session.id, session)
+        // Populate reverse lookup map
+        if (session.tmuxSession) {
+          tmuxToManagedMap.set(session.tmuxSession, session.id)
+        }
         // Track git status if session has a cwd
         if (session.cwd) {
           gitStatusManager.track(session.id, session.cwd)

@@ -211,6 +211,7 @@ function renderManagedSessions(): void {
   state.managedSessions.forEach((session, index) => {
     const el = document.createElement('div')
     el.className = 'session-item'
+    el.dataset.sessionId = session.id  // For targeted DOM updates (e.g., token updates)
     if (session.id === state.selectedManagedSession) {
       el.classList.add('active')
     }
@@ -2694,11 +2695,41 @@ function init() {
     }
 
     // Update managed session tokens if sessionId is provided
+    // Uses targeted DOM update instead of full re-render for performance
     if (data.sessionId) {
       const session = state.managedSessions.find(s => s.id === data.sessionId)
       if (session) {
         session.tokens = { current: data.current, cumulative: data.cumulative }
-        renderManagedSessions()
+
+        // Targeted DOM update: only update the token element for this session
+        const sessionEl = document.querySelector(`.session-item[data-session-id="${data.sessionId}"]`) as HTMLElement | null
+        if (sessionEl) {
+          let tokensEl = sessionEl.querySelector('.session-tokens')
+          if (!tokensEl) {
+            // Create token element if it doesn't exist
+            tokensEl = document.createElement('div')
+            tokensEl.className = 'session-tokens'
+            const infoEl = sessionEl.querySelector('.session-info')
+            const promptEl = sessionEl.querySelector('.session-prompt')
+            if (promptEl) {
+              infoEl?.insertBefore(tokensEl, promptEl)
+            } else {
+              infoEl?.appendChild(tokensEl)
+            }
+          }
+          tokensEl.textContent = `⚡ ${formatTokens(data.current)}`
+
+          // Update tooltip with new token info
+          const tooltipParts = sessionEl.title.split('\n')
+          const tokenLineIdx = tooltipParts.findIndex((l: string) => l.startsWith('Tokens:'))
+          const tokenLine = `Tokens: ${data.current.toLocaleString()} current, ${data.cumulative.toLocaleString()} total`
+          if (tokenLineIdx >= 0) {
+            tooltipParts[tokenLineIdx] = tokenLine
+          } else {
+            tooltipParts.push(tokenLine)
+          }
+          sessionEl.title = tooltipParts.join('\n')
+        }
       }
     }
   })
