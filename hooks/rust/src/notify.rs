@@ -15,70 +15,81 @@
 //!
 //! # Design Choices
 //!
-//! **Fire-and-forget threading**: The HTTP POST is spawned in a separate thread
-//! to avoid blocking the hook. This is important because:
+//! **Fire-and-forget child process**: The HTTP POST is performed by spawning
+//! a detached `curl` child process. This is important because:
 //!
 //! 1. Hook latency directly affects Claude Code responsiveness
 //! 2. Server may be down/slow - we don't want to block on that
 //! 3. Events are also written to JSONL, so HTTP delivery is optional
+//! 4. Child processes survive after the parent exits (unlike threads)
 //!
-//! **Short timeout**: 2-second timeout ensures we don't hang indefinitely
-//! if the server is unresponsive.
+//! **Why curl instead of ureq?** While ureq would be faster, threads die when
+//! main() exits. Bash's `curl &` creates a child *process* that survives parent
+//! exit. Using `Command::spawn()` with curl achieves the same behavior.
 //!
-//! **True fire-and-forget**: The spawned thread runs independently with no
-//! synchronization. The HTTP request may or may not complete before the
-//! process exits - this is acceptable since events are already persisted
-//! to the JSONL file. This approach minimizes hook latency.
+//! **Short timeout**: 2-second curl timeout (-m 2) ensures the child doesn't
+//! hang indefinitely if the server is unresponsive.
 
 use serde::Serialize;
-use std::thread;
-use std::time::Duration;
+use std::process::{Command, Stdio};
 
 /// Default WebSocket server endpoint for event notifications.
 const DEFAULT_URL: &str = "http://localhost:4003/event";
 
 /// HTTP request timeout in seconds.
 ///
-/// Short timeout (2s) ensures we don't block the hook for too long
+/// Short timeout (2s) ensures we don't block too long
 /// if the server is slow or unresponsive.
 const TIMEOUT_SECS: u64 = 2;
 
 /// Sends an event to the WebSocket server asynchronously.
 ///
-/// The HTTP POST is performed in a separate thread to avoid blocking
-/// the main hook execution. This is fire-and-forget - errors are silently
-/// ignored since the event is also persisted to the JSONL file.
+/// The HTTP POST is performed by spawning a detached `curl` child process.
+/// This is fire-and-forget - the child process runs independently and survives
+/// after main() exits (unlike threads). Errors are silently ignored since
+/// the event is also persisted to the JSONL file.
 ///
 /// # Arguments
 ///
 /// * `event` - Any serializable event to send
 /// * `url` - Optional custom endpoint URL (defaults to `localhost:4003/event`)
 ///
-/// # Thread Safety
+/// # Implementation Notes
 ///
-/// The event is moved into the spawned thread, so it must be `Send + 'static`.
-/// Serialization happens in the spawned thread to minimize main thread work.
+/// Uses `curl` command instead of ureq library because:
+/// - `thread::spawn()` creates threads that die when main() exits
+/// - `Command::spawn()` creates child processes that survive parent exit
+/// - This matches bash hook's `curl ... &` behavior
 ///
 /// # Example
 ///
 /// ```ignore
 /// notify_server(my_event, Some("http://custom:8080/event"));
-/// // Thread spawned, function returns immediately
+/// // Child process spawned, function returns immediately
 /// ```
-pub fn notify_server<T: Serialize + Send + 'static>(event: T, url: Option<&str>) {
-    let url = url.unwrap_or(DEFAULT_URL).to_string();
+pub fn notify_server<T: Serialize>(event: T, url: Option<&str>) {
+    let url = url.unwrap_or(DEFAULT_URL);
 
-    thread::spawn(move || {
-        let body = match serde_json::to_string(&event) {
-            Ok(b) => b,
-            Err(_) => return,
-        };
+    let body = match serde_json::to_string(&event) {
+        Ok(b) => b,
+        Err(_) => return,
+    };
 
-        let _ = ureq::post(&url)
-            .timeout(Duration::from_secs(TIMEOUT_SECS))
-            .set("Content-Type", "application/json")
-            .send(body.as_bytes());
-    });
+    // Spawn a detached child process using curl (same as bash's `curl ... &`)
+    // The child process survives after main() exits, unlike threads.
+    let _ = Command::new("curl")
+        .args([
+            "-s",                          // Silent mode
+            "-X", "POST",                  // HTTP POST
+            "-H", "Content-Type: application/json",
+            "-d", &body,                   // Request body
+            "-m", &TIMEOUT_SECS.to_string(), // Timeout in seconds
+            url,
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
 }
 
 /// Checks if WebSocket notifications are enabled.

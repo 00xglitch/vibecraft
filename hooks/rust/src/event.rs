@@ -27,16 +27,25 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// Default value for unknown/missing string fields.
+fn default_unknown() -> String {
+    "unknown".to_string()
+}
+
 /// Raw input from Claude Code hooks.
 ///
 /// This struct deserializes the JSON that Claude Code pipes to stdin when
 /// a hook event fires. Field names match Claude Code's output format.
 ///
-/// # Required Fields
+/// # Required Fields (with defaults for robustness)
 ///
-/// - `hook_event_name`: The event type (PascalCase, e.g., "PreToolUse")
-/// - `session_id`: Unique identifier for the Claude session
-/// - `cwd`: Current working directory
+/// - `hook_event_name`: The event type (PascalCase, e.g., "PreToolUse") - defaults to "unknown"
+/// - `session_id`: Unique identifier for the Claude session - defaults to "unknown"
+/// - `cwd`: Current working directory - defaults to empty string
+///
+/// **Note:** Fields have defaults to match bash hook behavior. Malformed input
+/// will produce events with "unknown" values rather than failing completely.
+/// This allows partial events to be recorded for debugging.
 ///
 /// # Optional Fields
 ///
@@ -58,7 +67,9 @@ use serde_json::Value;
 /// ```
 #[derive(Debug, Deserialize)]
 pub struct HookInput {
+    #[serde(default = "default_unknown")]
     pub hook_event_name: String,
+    #[serde(default = "default_unknown")]
     pub session_id: String,
     #[serde(default)]
     pub cwd: String,

@@ -50,6 +50,21 @@ log_fail() { echo -e "${RED}[FAIL]${NC} $1"; TESTS_FAILED=$((TESTS_FAILED + 1));
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_verbose() { [[ "$VERBOSE" == "true" ]] && echo -e "       $1" || true; }
 
+# Cross-platform timeout wrapper (macOS uses gtimeout from coreutils)
+run_with_timeout() {
+    local timeout_secs="$1"
+    shift
+    if command -v timeout &>/dev/null; then
+        timeout "$timeout_secs" "$@"
+    elif command -v gtimeout &>/dev/null; then
+        gtimeout "$timeout_secs" "$@"
+    else
+        # Fallback: run without timeout (not ideal but allows tests to run)
+        log_warn "Neither 'timeout' nor 'gtimeout' found - running without timeout"
+        "$@"
+    fi
+}
+
 # Find executables
 BASH_HOOK="$HOOKS_DIR/vibecraft-hook.sh"
 RUST_HOOK="$HOOKS_DIR/rust/target/release/vibecraft-hook"
@@ -280,7 +295,7 @@ test_env_overrides() {
 
     # Test VIBECRAFT_ENABLE_WS_NOTIFY=false (should not attempt connection)
     local temp_file=$(mktemp)
-    if timeout 1 bash -c "cat '$payload' | VIBECRAFT_EVENTS_FILE='$temp_file' VIBECRAFT_ENABLE_WS_NOTIFY=false '$RUST_HOOK'" >/dev/null 2>&1; then
+    if run_with_timeout 1 bash -c "cat '$payload' | VIBECRAFT_EVENTS_FILE='$temp_file' VIBECRAFT_ENABLE_WS_NOTIFY=false '$RUST_HOOK'" >/dev/null 2>&1; then
         log_pass "VIBECRAFT_ENABLE_WS_NOTIFY=false disables HTTP"
     else
         log_warn "VIBECRAFT_ENABLE_WS_NOTIFY test inconclusive"

@@ -42,6 +42,41 @@ function checkJq() {
   }
 }
 
+function checkCurl() {
+  try {
+    execSync('which curl', { stdio: 'ignore' })
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Check if the Rust hook binary is installed at ~/.vibecraft/hooks/vibecraft-hook
+ * @returns {boolean}
+ */
+function isRustHookInstalled() {
+  const hookBinary = join(homedir(), '.vibecraft', 'hooks', 'vibecraft-hook')
+  return existsSync(hookBinary)
+}
+
+/**
+ * Get the path to the installed hook (Rust binary or bash script)
+ * @returns {string|null} Path to installed hook, or null if not installed
+ */
+function getInstalledHookPath() {
+  const hookBinary = join(homedir(), '.vibecraft', 'hooks', 'vibecraft-hook')
+  const hookScript = join(homedir(), '.vibecraft', 'hooks', 'vibecraft-hook.sh')
+
+  if (existsSync(hookBinary)) {
+    return hookBinary
+  }
+  if (existsSync(hookScript)) {
+    return hookScript
+  }
+  return null
+}
+
 function checkTmux() {
   try {
     execSync('which tmux', { stdio: 'ignore' })
@@ -77,15 +112,25 @@ function checkHooksConfigured() {
 }
 
 function printHealthCheck() {
+  const rustHook = isRustHookInstalled()
   const jqOk = checkJq()
+  const curlOk = checkCurl()
   const tmuxOk = checkTmux()
   const hooksResult = checkHooksConfigured()
 
   let warnings = []
 
-  if (!jqOk) {
-    warnings.push(`  [!] jq not found - hooks won't work without it
+  // jq is only required for bash hook, not Rust hook
+  if (!rustHook && !jqOk) {
+    warnings.push(`  [!] jq not found - bash hooks won't work without it
       Install: brew install jq (macOS) or apt install jq (Linux)`)
+  }
+
+  // curl is optional - used by Rust hook for HTTP notifications (best-effort)
+  if (rustHook && !curlOk) {
+    warnings.push(`  [!] curl not found - real-time events may not work
+      Install: brew install curl (macOS) or apt install curl (Linux)
+      Note: Events are still saved to JSONL file`)
   }
 
   if (!tmuxOk) {
@@ -140,9 +185,17 @@ GitHub:  https://github.com/nearcyan/vibecraft
   process.exit(0)
 }
 
-// Hook path command
+// Hook path command - returns installed hook path (Rust binary or bash script)
 if (args.includes('--hook-path')) {
-  console.log(resolve(ROOT, 'hooks/vibecraft-hook.sh'))
+  const installedPath = getInstalledHookPath()
+  if (installedPath) {
+    console.log(installedPath)
+  } else {
+    // Not installed yet - show the source bash script path
+    // (user should run 'npx vibecraft setup' first)
+    console.log(resolve(ROOT, 'hooks/vibecraft-hook.sh'))
+    console.error('\nNote: Hook not installed. Run: npx vibecraft setup')
+  }
   process.exit(0)
 }
 
@@ -354,13 +407,23 @@ if (args[0] === 'setup') {
   console.log('  - UserPromptSubmit')
   console.log('  - Notification')
 
-  // Check dependencies
+  // Check dependencies (varies based on hook type)
   let hasWarnings = false
 
-  if (!checkJq()) {
+  // jq is only required for bash hook, not Rust hook
+  if (!usingRustBinary && !checkJq()) {
     hasWarnings = true
     console.log('\n[!] Warning: jq not found')
     console.log('    Install: brew install jq (macOS) or apt install jq (Linux)')
+    console.log('    Required for bash hook to process JSON')
+  }
+
+  // curl is optional for Rust hook (used for real-time HTTP notifications)
+  if (usingRustBinary && !checkCurl()) {
+    hasWarnings = true
+    console.log('\n[!] Warning: curl not found')
+    console.log('    Install: brew install curl (macOS) or apt install curl (Linux)')
+    console.log('    Optional - events still saved to JSONL without it')
   }
 
   if (!checkTmux()) {
@@ -553,6 +616,9 @@ if (args[0] === 'doctor') {
   // -------------------------------------------------------------------------
   console.log('[1/6] Checking dependencies...')
 
+  // Check which hook type is installed (affects dependency requirements)
+  const rustHookInstalled = isRustHookInstalled()
+
   // Node version
   const nodeVersion = process.version
   const nodeMajor = parseInt(nodeVersion.slice(1).split('.')[0])
@@ -563,7 +629,7 @@ if (args[0] === 'doctor') {
     issues.push('Node.js 18+ required')
   }
 
-  // jq
+  // jq - only required for bash hook, not Rust hook
   if (checkJq()) {
     try {
       const jqVersion = execSync('jq --version 2>&1', { encoding: 'utf-8' }).trim()
@@ -571,9 +637,11 @@ if (args[0] === 'doctor') {
     } catch {
       console.log('  ✓ jq')
     }
+  } else if (rustHookInstalled) {
+    console.log('  - jq not found (not needed for Rust hook)')
   } else {
     console.log('  ✗ jq not found')
-    issues.push('jq not installed - hooks will not work')
+    issues.push('jq not installed - bash hooks will not work')
   }
 
   // tmux
@@ -589,13 +657,15 @@ if (args[0] === 'doctor') {
     warnings.push('tmux not installed - browser prompt feature won\'t work')
   }
 
-  // curl
-  try {
-    execSync('which curl', { stdio: 'ignore' })
+  // curl - optional for Rust hook (used for HTTP notifications, but events still saved to JSONL)
+  if (checkCurl()) {
     console.log('  ✓ curl')
-  } catch {
+  } else if (rustHookInstalled) {
+    console.log('  ⚠ curl not found (optional - real-time events may not work)')
+    warnings.push('curl not installed - real-time events may not work (events still saved to JSONL)')
+  } else {
     console.log('  ✗ curl not found')
-    issues.push('curl not installed - hooks cannot send events to server')
+    issues.push('curl not installed - bash hooks cannot send events to server')
   }
 
   // -------------------------------------------------------------------------

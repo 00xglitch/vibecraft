@@ -2,20 +2,18 @@
 //!
 //! These tests validate the transformation of Claude Code hook input
 //! into Vibecraft events, ensuring correct field mapping and JSON structure.
+//!
+//! Unlike the previous tests that only validated input structure, these tests
+//! exercise the REAL transform function and verify the output.
 
-use serde_json::{json, Value};
+use serde_json::json;
+use vibecraft_hook::event::HookInput;
+use vibecraft_hook::transform::transform;
 
-/// Helper to transform input JSON and extract the event
-fn transform_json(input: Value) -> Value {
-    // We'll test the JSON structure that would be produced
-    // This is a simplified version that tests the expected output structure
-    input
-}
-
-/// Test pre_tool_use event transformation
+/// Test pre_tool_use event transformation with real transform function
 #[test]
-fn test_pre_tool_use_structure() {
-    let input = json!({
+fn test_pre_tool_use_transformation() {
+    let input_json = json!({
         "hook_event_name": "PreToolUse",
         "session_id": "test-session-123",
         "cwd": "/test/path",
@@ -24,23 +22,32 @@ fn test_pre_tool_use_structure() {
         "tool_use_id": "toolu_123"
     });
 
-    // Expected output structure
-    let expected_fields = vec!["type", "sessionId", "cwd", "tool", "toolInput", "toolUseId"];
+    let input: HookInput = serde_json::from_value(input_json.clone()).unwrap();
+    let event = transform(input, input_json);
 
-    // Verify input has the required hook fields
-    assert!(input.get("hook_event_name").is_some());
-    assert_eq!(input["session_id"], "test-session-123");
-    assert_eq!(input["tool_name"], "Read");
+    // Verify output structure
+    let output = serde_json::to_value(&event).unwrap();
 
-    // The transform should map hook_event_name to snake_case type
-    let hook_event = input["hook_event_name"].as_str().unwrap();
-    assert_eq!(hook_event, "PreToolUse");
+    assert_eq!(output["type"], "pre_tool_use");
+    assert_eq!(output["sessionId"], "test-session-123");
+    assert_eq!(output["cwd"], "/test/path");
+    assert_eq!(output["tool"], "Read");
+    assert_eq!(output["toolUseId"], "toolu_123");
+
+    // Verify id contains session_id and has timestamp component
+    let id = output["id"].as_str().unwrap();
+    assert!(id.starts_with("test-session-123-"), "ID should start with session_id");
+
+    // Verify timestamp is present and reasonable (within last second)
+    let timestamp = output["timestamp"].as_i64().unwrap();
+    let now = chrono::Utc::now().timestamp_millis();
+    assert!(timestamp <= now && timestamp > now - 1000, "Timestamp should be recent");
 }
 
 /// Test post_tool_use event transformation
 #[test]
-fn test_post_tool_use_structure() {
-    let input = json!({
+fn test_post_tool_use_transformation() {
+    let input_json = json!({
         "hook_event_name": "PostToolUse",
         "session_id": "test-session-123",
         "cwd": "/test/path",
@@ -53,14 +60,21 @@ fn test_post_tool_use_structure() {
         }
     });
 
-    assert!(input.get("tool_response").is_some());
-    assert_eq!(input["tool_response"]["success"], true);
+    let input: HookInput = serde_json::from_value(input_json.clone()).unwrap();
+    let event = transform(input, input_json);
+
+    let output = serde_json::to_value(&event).unwrap();
+
+    assert_eq!(output["type"], "post_tool_use");
+    assert_eq!(output["tool"], "Edit");
+    assert_eq!(output["success"], true);
+    assert!(output["toolResponse"].is_object());
 }
 
 /// Test post_tool_use with failure response
 #[test]
 fn test_post_tool_use_failure() {
-    let input = json!({
+    let input_json = json!({
         "hook_event_name": "PostToolUse",
         "session_id": "test-session-123",
         "cwd": "/test/path",
@@ -73,69 +87,95 @@ fn test_post_tool_use_failure() {
         }
     });
 
-    assert_eq!(input["tool_response"]["success"], false);
+    let input: HookInput = serde_json::from_value(input_json.clone()).unwrap();
+    let event = transform(input, input_json);
+
+    let output = serde_json::to_value(&event).unwrap();
+
+    assert_eq!(output["type"], "post_tool_use");
+    assert_eq!(output["success"], false);
 }
 
 /// Test stop event transformation
 #[test]
-fn test_stop_event() {
-    let input = json!({
+fn test_stop_event_transformation() {
+    let input_json = json!({
         "hook_event_name": "Stop",
         "session_id": "test-session-123",
         "cwd": "/test/path",
         "stop_hook_active": false
     });
 
-    assert_eq!(input["hook_event_name"], "Stop");
-    assert_eq!(input["stop_hook_active"], false);
+    let input: HookInput = serde_json::from_value(input_json.clone()).unwrap();
+    let event = transform(input, input_json);
+
+    let output = serde_json::to_value(&event).unwrap();
+
+    assert_eq!(output["type"], "stop");
+    assert_eq!(output["stopHookActive"], false);
 }
 
 /// Test session_start event transformation
 #[test]
-fn test_session_start_event() {
-    let input = json!({
+fn test_session_start_transformation() {
+    let input_json = json!({
         "hook_event_name": "SessionStart",
         "session_id": "test-session-123",
         "cwd": "/test/path",
         "source": "startup"
     });
 
-    assert_eq!(input["hook_event_name"], "SessionStart");
-    assert_eq!(input["source"], "startup");
+    let input: HookInput = serde_json::from_value(input_json.clone()).unwrap();
+    let event = transform(input, input_json);
+
+    let output = serde_json::to_value(&event).unwrap();
+
+    assert_eq!(output["type"], "session_start");
+    assert_eq!(output["source"], "startup");
 }
 
 /// Test session_end event transformation
 #[test]
-fn test_session_end_event() {
-    let input = json!({
+fn test_session_end_transformation() {
+    let input_json = json!({
         "hook_event_name": "SessionEnd",
         "session_id": "test-session-123",
         "cwd": "/test/path",
         "reason": "user_exit"
     });
 
-    assert_eq!(input["hook_event_name"], "SessionEnd");
-    assert_eq!(input["reason"], "user_exit");
+    let input: HookInput = serde_json::from_value(input_json.clone()).unwrap();
+    let event = transform(input, input_json);
+
+    let output = serde_json::to_value(&event).unwrap();
+
+    assert_eq!(output["type"], "session_end");
+    assert_eq!(output["reason"], "user_exit");
 }
 
 /// Test user_prompt_submit event transformation
 #[test]
-fn test_user_prompt_submit_event() {
-    let input = json!({
+fn test_user_prompt_submit_transformation() {
+    let input_json = json!({
         "hook_event_name": "UserPromptSubmit",
         "session_id": "test-session-123",
         "cwd": "/test/path",
         "prompt": "Help me fix this bug"
     });
 
-    assert_eq!(input["hook_event_name"], "UserPromptSubmit");
-    assert_eq!(input["prompt"], "Help me fix this bug");
+    let input: HookInput = serde_json::from_value(input_json.clone()).unwrap();
+    let event = transform(input, input_json);
+
+    let output = serde_json::to_value(&event).unwrap();
+
+    assert_eq!(output["type"], "user_prompt_submit");
+    assert_eq!(output["prompt"], "Help me fix this bug");
 }
 
 /// Test notification event transformation
 #[test]
-fn test_notification_event() {
-    let input = json!({
+fn test_notification_transformation() {
+    let input_json = json!({
         "hook_event_name": "Notification",
         "session_id": "test-session-123",
         "cwd": "/test/path",
@@ -143,27 +183,38 @@ fn test_notification_event() {
         "notification_type": "permission"
     });
 
-    assert_eq!(input["hook_event_name"], "Notification");
-    assert_eq!(input["notification_type"], "permission");
+    let input: HookInput = serde_json::from_value(input_json.clone()).unwrap();
+    let event = transform(input, input_json);
+
+    let output = serde_json::to_value(&event).unwrap();
+
+    assert_eq!(output["type"], "notification");
+    assert_eq!(output["message"], "Permission required");
+    assert_eq!(output["notificationType"], "permission");
 }
 
 /// Test subagent_stop event transformation
 #[test]
-fn test_subagent_stop_event() {
-    let input = json!({
+fn test_subagent_stop_transformation() {
+    let input_json = json!({
         "hook_event_name": "SubagentStop",
         "session_id": "test-session-123",
         "cwd": "/test/path",
         "stop_hook_active": false
     });
 
-    assert_eq!(input["hook_event_name"], "SubagentStop");
+    let input: HookInput = serde_json::from_value(input_json.clone()).unwrap();
+    let event = transform(input, input_json);
+
+    let output = serde_json::to_value(&event).unwrap();
+
+    assert_eq!(output["type"], "subagent_stop");
 }
 
 /// Test pre_compact event transformation
 #[test]
-fn test_pre_compact_event() {
-    let input = json!({
+fn test_pre_compact_transformation() {
+    let input_json = json!({
         "hook_event_name": "PreCompact",
         "session_id": "test-session-123",
         "cwd": "/test/path",
@@ -171,56 +222,79 @@ fn test_pre_compact_event() {
         "custom_instructions": "Focus on the main task"
     });
 
-    assert_eq!(input["hook_event_name"], "PreCompact");
-    assert_eq!(input["trigger"], "auto");
+    let input: HookInput = serde_json::from_value(input_json.clone()).unwrap();
+    let event = transform(input, input_json);
+
+    let output = serde_json::to_value(&event).unwrap();
+
+    assert_eq!(output["type"], "pre_compact");
+    assert_eq!(output["trigger"], "auto");
 }
 
-/// Test event type mapping from PascalCase to snake_case
+/// Test unknown event type transformation
 #[test]
-fn test_event_type_mapping() {
-    let mappings = vec![
-        ("PreToolUse", "pre_tool_use"),
-        ("PostToolUse", "post_tool_use"),
-        ("Stop", "stop"),
-        ("SubagentStop", "subagent_stop"),
-        ("SessionStart", "session_start"),
-        ("SessionEnd", "session_end"),
-        ("UserPromptSubmit", "user_prompt_submit"),
-        ("Notification", "notification"),
-        ("PreCompact", "pre_compact"),
-    ];
-
-    for (input, expected) in mappings {
-        // Verify the expected snake_case format
-        assert!(expected.contains('_') || expected == "stop" || expected == "notification");
-        assert!(!expected.chars().any(|c| c.is_uppercase()));
-    }
-}
-
-/// Test handling of missing optional fields
-#[test]
-fn test_missing_optional_fields() {
-    // Minimal valid input
-    let input = json!({
-        "hook_event_name": "PreToolUse",
+fn test_unknown_event_transformation() {
+    let input_json = json!({
+        "hook_event_name": "SomeNewEventType",
         "session_id": "test-session-123",
         "cwd": "/test/path"
     });
 
-    // Should have required fields
-    assert!(input.get("hook_event_name").is_some());
-    assert!(input.get("session_id").is_some());
-    assert!(input.get("cwd").is_some());
+    let input: HookInput = serde_json::from_value(input_json.clone()).unwrap();
+    let event = transform(input, input_json.clone());
 
-    // Optional fields can be missing
-    assert!(input.get("tool_name").is_none());
-    assert!(input.get("tool_input").is_none());
+    let output = serde_json::to_value(&event).unwrap();
+
+    assert_eq!(output["type"], "unknown");
+    // Unknown events should preserve raw input
+    assert!(output["raw"].is_object());
+}
+
+/// Test handling of missing optional fields (defaults)
+#[test]
+fn test_missing_optional_fields_with_defaults() {
+    // Minimal valid input - tests serde defaults
+    let input_json = json!({
+        "hook_event_name": "PreToolUse",
+        "session_id": "test-session-123",
+        "cwd": "/test/path"
+        // Missing: tool_name, tool_input, tool_use_id
+    });
+
+    let input: HookInput = serde_json::from_value(input_json.clone()).unwrap();
+    let event = transform(input, input_json);
+
+    let output = serde_json::to_value(&event).unwrap();
+
+    assert_eq!(output["type"], "pre_tool_use");
+    // Missing tool_name should default to "unknown"
+    assert_eq!(output["tool"], "unknown");
+    // Missing tool_use_id should default to empty string
+    assert_eq!(output["toolUseId"], "");
+}
+
+/// Test malformed input uses defaults (Issue 5 fix)
+#[test]
+fn test_malformed_input_uses_defaults() {
+    // Input missing hook_event_name and session_id - should use defaults
+    let input_json = json!({
+        "cwd": "/test/path"
+    });
+
+    let input: HookInput = serde_json::from_value(input_json.clone()).unwrap();
+    let event = transform(input, input_json.clone());
+
+    let output = serde_json::to_value(&event).unwrap();
+
+    // Should produce "unknown" type event with defaults
+    assert_eq!(output["type"], "unknown");
+    assert_eq!(output["sessionId"], "unknown");
 }
 
 /// Test complex tool input handling
 #[test]
 fn test_complex_tool_input() {
-    let input = json!({
+    let input_json = json!({
         "hook_event_name": "PreToolUse",
         "session_id": "test-session-123",
         "cwd": "/test/path",
@@ -234,63 +308,58 @@ fn test_complex_tool_input() {
         "tool_use_id": "toolu_task_001"
     });
 
-    let tool_input = &input["tool_input"];
-    assert_eq!(tool_input["subagent_type"], "Explore");
-    assert_eq!(tool_input["run_in_background"], true);
-}
+    let input: HookInput = serde_json::from_value(input_json.clone()).unwrap();
+    let event = transform(input, input_json);
 
-/// Test JSON serialization round-trip
-#[test]
-fn test_json_serialization() {
-    let input = json!({
-        "hook_event_name": "PreToolUse",
-        "session_id": "test-session-123",
-        "cwd": "/test/path",
-        "tool_name": "Read",
-        "tool_input": {"file_path": "/test.txt"},
-        "tool_use_id": "toolu_123"
-    });
+    let output = serde_json::to_value(&event).unwrap();
 
-    // Serialize and deserialize
-    let json_str = serde_json::to_string(&input).unwrap();
-    let parsed: Value = serde_json::from_str(&json_str).unwrap();
-
-    assert_eq!(input, parsed);
+    assert_eq!(output["toolInput"]["subagent_type"], "Explore");
+    assert_eq!(output["toolInput"]["run_in_background"], true);
 }
 
 /// Test Unicode handling in prompts
 #[test]
 fn test_unicode_handling() {
-    let input = json!({
+    let input_json = json!({
         "hook_event_name": "UserPromptSubmit",
         "session_id": "test-session-123",
         "cwd": "/test/path",
-        "prompt": "Help me with \u{1F600} emoji and \u{4E2D}\u{6587} Chinese"
+        "prompt": "Help me with 😀 emoji and 中文 Chinese"
     });
 
-    let prompt = input["prompt"].as_str().unwrap();
-    assert!(prompt.contains('\u{1F600}')); // Emoji
-    assert!(prompt.contains('\u{4E2D}')); // Chinese char
+    let input: HookInput = serde_json::from_value(input_json.clone()).unwrap();
+    let event = transform(input, input_json);
+
+    let output = serde_json::to_value(&event).unwrap();
+
+    let prompt = output["prompt"].as_str().unwrap();
+    assert!(prompt.contains('😀'));
+    assert!(prompt.contains('中'));
 }
 
 /// Test long prompt handling
 #[test]
 fn test_long_prompt() {
     let long_text = "x".repeat(10000);
-    let input = json!({
+    let input_json = json!({
         "hook_event_name": "UserPromptSubmit",
         "session_id": "test-session-123",
         "cwd": "/test/path",
         "prompt": long_text
     });
 
-    assert_eq!(input["prompt"].as_str().unwrap().len(), 10000);
+    let input: HookInput = serde_json::from_value(input_json.clone()).unwrap();
+    let event = transform(input, input_json);
+
+    let output = serde_json::to_value(&event).unwrap();
+
+    assert_eq!(output["prompt"].as_str().unwrap().len(), 10000);
 }
 
 /// Test special characters in paths
 #[test]
 fn test_special_path_characters() {
-    let input = json!({
+    let input_json = json!({
         "hook_event_name": "PreToolUse",
         "session_id": "test-session-123",
         "cwd": "/Users/test/My Projects/app (v2)/src",
@@ -299,6 +368,45 @@ fn test_special_path_characters() {
         "tool_use_id": "toolu_123"
     });
 
-    assert!(input["cwd"].as_str().unwrap().contains(" "));
-    assert!(input["tool_input"]["file_path"].as_str().unwrap().contains(" "));
+    let input: HookInput = serde_json::from_value(input_json.clone()).unwrap();
+    let event = transform(input, input_json);
+
+    let output = serde_json::to_value(&event).unwrap();
+
+    assert!(output["cwd"].as_str().unwrap().contains(" "));
+    assert!(output["toolInput"]["file_path"].as_str().unwrap().contains(" "));
+}
+
+/// Test event type mapping from PascalCase to snake_case
+#[test]
+fn test_all_event_type_mappings() {
+    let mappings = vec![
+        ("PreToolUse", "pre_tool_use"),
+        ("PostToolUse", "post_tool_use"),
+        ("Stop", "stop"),
+        ("SubagentStop", "subagent_stop"),
+        ("SessionStart", "session_start"),
+        ("SessionEnd", "session_end"),
+        ("UserPromptSubmit", "user_prompt_submit"),
+        ("Notification", "notification"),
+        ("PreCompact", "pre_compact"),
+    ];
+
+    for (pascal_case, expected_snake_case) in mappings {
+        let input_json = json!({
+            "hook_event_name": pascal_case,
+            "session_id": "test",
+            "cwd": "/test"
+        });
+
+        let input: HookInput = serde_json::from_value(input_json.clone()).unwrap();
+        let event = transform(input, input_json);
+
+        let output = serde_json::to_value(&event).unwrap();
+        assert_eq!(
+            output["type"].as_str().unwrap(),
+            expected_snake_case,
+            "Failed mapping for {}", pascal_case
+        );
+    }
 }

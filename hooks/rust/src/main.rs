@@ -37,11 +37,9 @@
 //! - No interpreter startup time
 //! - Static linking (minimal dynamic library overhead)
 
-mod event;
-mod notify;
-mod transform;
-
-use event::HookInput;
+use vibecraft_hook::event::HookInput;
+use vibecraft_hook::notify;
+use vibecraft_hook::transform;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
