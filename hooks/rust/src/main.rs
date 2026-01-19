@@ -166,13 +166,11 @@ fn main() {
         std::process::exit(1);
     }
 
-    // Notify WebSocket server (fire-and-forget)
+    // Notify WebSocket server (true fire-and-forget)
+    // The event is already persisted to JSONL, so HTTP notification is best-effort.
+    // No sleep - spawned thread runs independently, may or may not complete before exit.
     if notify::is_notify_enabled() {
         let url = notify::get_notify_url();
         notify::notify_server(event, Some(&url));
-
-        // Give the thread a small window to start the HTTP request
-        // This is a compromise between blocking and fire-and-forget
-        std::thread::sleep(std::time::Duration::from_millis(10));
     }
 }

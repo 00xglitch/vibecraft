@@ -25,10 +25,10 @@
 //! **Short timeout**: 2-second timeout ensures we don't hang indefinitely
 //! if the server is unresponsive.
 //!
-//! **Main thread delay**: We sleep 10ms in main() after spawning to give
-//! the HTTP thread time to start. This is a compromise between pure
-//! fire-and-forget (request may not start before process exits) and
-//! full blocking (defeats the purpose of threading).
+//! **True fire-and-forget**: The spawned thread runs independently with no
+//! synchronization. The HTTP request may or may not complete before the
+//! process exits - this is acceptable since events are already persisted
+//! to the JSONL file. This approach minimizes hook latency.
 
 use serde::Serialize;
 use std::thread;
