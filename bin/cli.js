@@ -149,6 +149,7 @@ if (args.includes('--hook-path')) {
 // Setup command
 if (args[0] === 'setup') {
   const { writeFileSync, copyFileSync, chmodSync } = await import('fs')
+  const { arch, platform } = await import('os')
 
   console.log('Setting up vibecraft hooks...\n')
 
@@ -183,12 +184,10 @@ if (args[0] === 'setup') {
   console.log(`Claude settings: ${settingsPath}`)
 
   // ==========================================================================
-  // Step 2: Install hook script to ~/.vibecraft/hooks/
+  // Step 2: Install hook to ~/.vibecraft/hooks/
   // ==========================================================================
 
   const vibecraftHooksDir = join(homedir(), '.vibecraft', 'hooks')
-  const installedHookPath = join(vibecraftHooksDir, 'vibecraft-hook.sh')
-  const sourceHookPath = resolve(ROOT, 'hooks/vibecraft-hook.sh')
 
   // Ensure hooks directory exists
   if (!existsSync(vibecraftHooksDir)) {
@@ -196,20 +195,67 @@ if (args[0] === 'setup') {
     console.log(`Created ${vibecraftHooksDir}`)
   }
 
-  // Copy hook script
-  if (!existsSync(sourceHookPath)) {
-    console.error(`ERROR: Hook script not found at ${sourceHookPath}`)
-    console.error('This is a bug - please report it.')
-    process.exit(1)
+  // Try to install Rust binary first (7-10x faster than bash)
+  // Fall back to bash script if binary not available for this platform
+  let installedHookPath = null
+  let usingRustBinary = false
+
+  // Determine which binary to use based on platform
+  const os = platform()
+  const cpuArch = arch()
+  let binaryName = null
+
+  if (os === 'darwin') {
+    // macOS - try universal binary first, then architecture-specific
+    if (existsSync(resolve(ROOT, 'hooks/bin/vibecraft-hook-darwin-universal'))) {
+      binaryName = 'vibecraft-hook-darwin-universal'
+    } else if (cpuArch === 'arm64' && existsSync(resolve(ROOT, 'hooks/bin/vibecraft-hook-darwin-arm64'))) {
+      binaryName = 'vibecraft-hook-darwin-arm64'
+    } else if (cpuArch === 'x64' && existsSync(resolve(ROOT, 'hooks/bin/vibecraft-hook-darwin-x64'))) {
+      binaryName = 'vibecraft-hook-darwin-x64'
+    }
+  } else if (os === 'linux' && cpuArch === 'x64') {
+    if (existsSync(resolve(ROOT, 'hooks/bin/vibecraft-hook-linux-x64'))) {
+      binaryName = 'vibecraft-hook-linux-x64'
+    }
   }
 
-  try {
-    copyFileSync(sourceHookPath, installedHookPath)
-    chmodSync(installedHookPath, 0o755) // Make executable
-    console.log(`Installed hook: ${installedHookPath}`)
-  } catch (e) {
-    console.error(`ERROR: Failed to install hook script: ${e.message}`)
-    process.exit(1)
+  // Try to install the binary
+  if (binaryName) {
+    const sourceBinaryPath = resolve(ROOT, 'hooks/bin', binaryName)
+    const installedBinaryPath = join(vibecraftHooksDir, 'vibecraft-hook')
+
+    try {
+      copyFileSync(sourceBinaryPath, installedBinaryPath)
+      chmodSync(installedBinaryPath, 0o755)
+      installedHookPath = installedBinaryPath
+      usingRustBinary = true
+      console.log(`Installed Rust hook: ${installedHookPath} (7-10x faster)`)
+    } catch (e) {
+      console.log(`Could not install Rust binary: ${e.message}`)
+      console.log('Falling back to bash script...')
+    }
+  }
+
+  // Fall back to bash script if binary not available or failed to install
+  if (!usingRustBinary) {
+    const sourceHookPath = resolve(ROOT, 'hooks/vibecraft-hook.sh')
+    installedHookPath = join(vibecraftHooksDir, 'vibecraft-hook.sh')
+
+    if (!existsSync(sourceHookPath)) {
+      console.error(`ERROR: Hook script not found at ${sourceHookPath}`)
+      console.error('This is a bug - please report it.')
+      process.exit(1)
+    }
+
+    try {
+      copyFileSync(sourceHookPath, installedHookPath)
+      chmodSync(installedHookPath, 0o755) // Make executable
+      console.log(`Installed bash hook: ${installedHookPath}`)
+    } catch (e) {
+      console.error(`ERROR: Failed to install hook script: ${e.message}`)
+      process.exit(1)
+    }
   }
 
   // ==========================================================================
@@ -446,9 +492,17 @@ if (args[0] === 'uninstall') {
   }
 
   // ==========================================================================
-  // Step 3: Remove hook script (but keep data)
+  // Step 3: Remove hook files (but keep data)
   // ==========================================================================
 
+  // Remove Rust binary if it exists
+  const hookBinary = join(homedir(), '.vibecraft', 'hooks', 'vibecraft-hook')
+  if (existsSync(hookBinary)) {
+    rmSync(hookBinary)
+    console.log(`Removed: ${hookBinary}`)
+  }
+
+  // Remove bash script if it exists
   const hookScript = join(homedir(), '.vibecraft', 'hooks', 'vibecraft-hook.sh')
   if (existsSync(hookScript)) {
     rmSync(hookScript)
@@ -545,26 +599,44 @@ if (args[0] === 'doctor') {
   }
 
   // -------------------------------------------------------------------------
-  // 2. Check hook script
+  // 2. Check hook (Rust binary or bash script)
   // -------------------------------------------------------------------------
-  console.log('\n[2/6] Checking hook script...')
+  console.log('\n[2/6] Checking hook...')
 
+  const hookBinary = join(homedir(), '.vibecraft', 'hooks', 'vibecraft-hook')
   const hookScript = join(homedir(), '.vibecraft', 'hooks', 'vibecraft-hook.sh')
-  if (existsSync(hookScript)) {
-    console.log(`  ✓ Hook script exists: ${hookScript}`)
+
+  let hookPath = null
+  let hookType = null
+
+  if (existsSync(hookBinary)) {
+    hookPath = hookBinary
+    hookType = 'Rust binary'
+  } else if (existsSync(hookScript)) {
+    hookPath = hookScript
+    hookType = 'bash script'
+  }
+
+  if (hookPath) {
+    console.log(`  ✓ Hook exists: ${hookPath} (${hookType})`)
 
     // Check if executable
     try {
       const { accessSync, constants } = await import('fs')
-      accessSync(hookScript, constants.X_OK)
-      console.log('  ✓ Hook script is executable')
+      accessSync(hookPath, constants.X_OK)
+      console.log('  ✓ Hook is executable')
+
+      // For Rust binary, show if it's faster
+      if (hookType === 'Rust binary') {
+        console.log('  ✓ Using high-performance Rust hook (7-10x faster)')
+      }
     } catch {
-      console.log('  ✗ Hook script is not executable')
-      issues.push(`Hook script not executable. Run: chmod +x ${hookScript}`)
+      console.log('  ✗ Hook is not executable')
+      issues.push(`Hook not executable. Run: chmod +x ${hookPath}`)
     }
   } else {
-    console.log(`  ✗ Hook script not found: ${hookScript}`)
-    issues.push('Hook script not installed. Run: npx vibecraft setup')
+    console.log(`  ✗ Hook not found`)
+    issues.push('Hook not installed. Run: npx vibecraft setup')
   }
 
   // -------------------------------------------------------------------------
