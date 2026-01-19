@@ -223,6 +223,7 @@ function renderManagedSessions(): void {
 
     const statusClass = session.status
     const hotkey = index < 6 ? getSessionKeybind(index) : '' // 1-6 shown in UI
+    const isImplicit = session.id.startsWith('implicit-')
 
     // Time since last activity (needed for detail line)
     const lastActive = session.lastActivity
@@ -258,7 +259,7 @@ function renderManagedSessions(): void {
     const tooltipParts = [
       `Name: ${session.name}`,
       `Status: ${session.status}`,
-      `tmux: ${session.tmuxSession}`,
+      isImplicit ? 'External session (not spawned by Vibecraft)' : `tmux: ${session.tmuxSession}`,
       session.claudeSessionId ? `Claude ID: ${session.claudeSessionId.slice(0, 12)}...` : 'Not linked yet',
       session.cwd ? `Dir: ${session.cwd}` : '',
       session.lastActivity ? `Last active: ${new Date(session.lastActivity).toLocaleString()}` : '',
@@ -270,12 +271,12 @@ function renderManagedSessions(): void {
       ${hotkey ? `<div class="session-hotkey">${hotkey}</div>` : ''}
       <div class="session-status ${statusClass}"></div>
       <div class="session-info">
-        <div class="session-name">${escapeHtml(session.name)}</div>
+        <div class="session-name">${escapeHtml(session.name)}${isImplicit ? ' <span class="external-badge">ext</span>' : ''}</div>
         <div class="${detailClass}">${detail}${!needsAttention && session.status !== 'offline' && lastActive ? ` · ${lastActive}` : ''}</div>
         ${truncatedPrompt ? `<div class="session-prompt">💬 ${escapeHtml(truncatedPrompt)}</div>` : ''}
       </div>
       <div class="session-actions">
-        ${session.status === 'offline' ? `<button class="restart-btn" title="Restart session">🔄</button>` : ''}
+        ${!isImplicit && session.status === 'offline' ? `<button class="restart-btn" title="Restart session">🔄</button>` : ''}
         <button class="rename-btn" title="Rename">✏️</button>
         <button class="delete-btn" title="Delete">🗑️</button>
       </div>
@@ -1343,7 +1344,7 @@ function setupDevPanel(): void {
 /** Map Claude sessionIds to managed session IDs */
 const claudeToManagedLink = new Map<string, string>()
 
-function getOrCreateSession(sessionId: string): SessionState | null {
+function getOrCreateSession(sessionId: string, cwd?: string): SessionState | null {
   let session = state.sessions.get(sessionId)
   if (session) return session
 
@@ -1351,18 +1352,14 @@ function getOrCreateSession(sessionId: string): SessionState | null {
     throw new Error('Scene not initialized')
   }
 
-  // Check if this session can be linked to a managed session
-  // Only create zones for sessions that are linked or can be linked
-  const canLink = canLinkToManagedSession(sessionId)
-  if (!canLink) {
-    // Unlinked session - don't create a zone for it
-    console.log(`Ignoring unlinked session ${sessionId.slice(0, 8)} (no matching managed session)`)
-    return null
-  }
+  // Try to link to an existing managed session first
+  let linkedManagedSession = tryLinkToManagedSession(sessionId)
 
-  // Try to link to a recently-created managed session FIRST
-  // (so we can get the hint position from it)
-  const linkedManagedSession = tryLinkToManagedSession(sessionId)
+  // If no existing managed session, create an implicit one for this external Claude
+  if (!linkedManagedSession) {
+    console.log(`Creating implicit managed session for external Claude ${sessionId.slice(0, 8)}`)
+    linkedManagedSession = createImplicitManagedSession(sessionId, cwd)
+  }
 
   // Look up hint position: first check saved zone position, then pending hints
   let hintPosition: { x: number; z: number } | undefined
@@ -1461,38 +1458,6 @@ function getOrCreateSession(sessionId: string): SessionState | null {
 }
 
 /**
- * Check if a Claude session can be linked to a managed session
- * Returns true if already linked or if there's a recently-created unlinked managed session
- */
-function canLinkToManagedSession(claudeSessionId: string): boolean {
-  // Already linked?
-  if (claudeToManagedLink.has(claudeSessionId)) {
-    return true
-  }
-
-  // Is this session already known to a managed session?
-  for (const managed of state.managedSessions) {
-    if (managed.claudeSessionId === claudeSessionId) {
-      return true
-    }
-  }
-
-  // Is there a recently-created unlinked managed session we can link to?
-  const now = Date.now()
-  const LINK_WINDOW_MS = 30_000 // 30 seconds
-  for (const managed of state.managedSessions) {
-    if (!managed.claudeSessionId) {
-      const age = now - managed.createdAt
-      if (age < LINK_WINDOW_MS) {
-        return true
-      }
-    }
-  }
-
-  return false
-}
-
-/**
  * Try to link a Claude session to a managed session
  * Uses timing: looks for unlinked managed sessions created in the last 30 seconds
  */
@@ -1533,6 +1498,32 @@ function tryLinkToManagedSession(claudeSessionId: string): ManagedSession | null
  */
 async function linkSessionOnServer(managedId: string, claudeSessionId: string): Promise<void> {
   await sessionAPI.linkSession(managedId, claudeSessionId)
+}
+
+/**
+ * Create an implicit managed session for an external Claude instance.
+ * This allows unmanaged Claude sessions (started in a regular terminal) to get 3D zones.
+ */
+function createImplicitManagedSession(claudeSessionId: string, cwd?: string): ManagedSession {
+  const shortId = claudeSessionId.slice(0, 8)
+  const managed: ManagedSession = {
+    id: `implicit-${claudeSessionId}`,
+    name: `Claude ${shortId}`,
+    tmuxSession: '', // Unknown - not spawned by Vibecraft
+    status: 'working',
+    claudeSessionId,
+    createdAt: Date.now(),
+    lastActivity: Date.now(),
+    cwd: cwd || '~',
+  }
+  state.managedSessions.push(managed)
+  claudeToManagedLink.set(claudeSessionId, managed.id)
+
+  // Re-render sessions list to show the new implicit session
+  renderManagedSessions()
+
+  console.log(`Created implicit managed session for external Claude ${shortId}`)
+  return managed
 }
 
 /**
@@ -1747,8 +1738,8 @@ function updateStats() {
 
 function handleEvent(event: ClaudeEvent) {
   // Get or create session for this event
-  // Returns null if the session isn't linked to a managed session
-  const session = getOrCreateSession(event.sessionId)
+  // Creates implicit managed session for external Claude instances
+  const session = getOrCreateSession(event.sessionId, event.cwd)
 
   state.eventHistory.push(event)
 

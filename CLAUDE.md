@@ -537,6 +537,7 @@ Client rebuilds its local `claudeToManagedLink` map from server data on every `s
 
 ## Recent Features Added
 
+- **External Claude support**: Creates implicit managed sessions for Claude instances started outside Vibecraft (in regular terminal). External sessions get their own 3D zones with "ext" badge in sidebar
 - **Floating context labels**: Text sprites above stations showing current file/command
 - **Thought bubbles**: Animated bubbles when Claude is thinking (full) or working (small)
 - **Response capture**: Stop hook reads transcript to extract Claude's text response

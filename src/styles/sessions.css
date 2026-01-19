@@ -273,3 +273,19 @@
   border-color: rgba(167, 139, 250, 0.4);
   color: #c4b5fd;
 }
+
+/* External session badge - for sessions not spawned by Vibecraft */
+.external-badge {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 1px 4px;
+  background: rgba(147, 197, 253, 0.15);
+  border: 1px solid rgba(147, 197, 253, 0.3);
+  border-radius: 3px;
+  color: #93c5fd;
+  margin-left: 4px;
+  vertical-align: middle;
+}
