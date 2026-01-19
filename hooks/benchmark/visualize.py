@@ -32,11 +32,16 @@ class BenchmarkResult(NamedTuple):
 
 
 def load_benchmark_results(results_dir: Path) -> list[BenchmarkResult]:
-    """Load all benchmark results from JSON files."""
+    """Load all benchmark results from JSON files.
+
+    Supports two file formats:
+    1. Separate files: bash_pre_tool_use.json, rust_pre_tool_use.json
+    2. Combined files: pre_tool_use.json (containing both bash and rust results)
+    """
     results = []
 
     for json_file in sorted(results_dir.glob("*.json")):
-        event_type = json_file.stem  # e.g., "pre_tool_use"
+        stem = json_file.stem  # e.g., "bash_pre_tool_use" or "pre_tool_use"
 
         with open(json_file, 'r') as f:
             data = json.load(f)
@@ -44,11 +49,19 @@ def load_benchmark_results(results_dir: Path) -> list[BenchmarkResult]:
         for result in data.get("results", []):
             command = result.get("command", "")
 
-            # Determine if this is Bash or Rust based on command
-            if "vibecraft-hook.sh" in command:
+            # Determine implementation and event type from filename or command
+            if stem.startswith("bash_"):
                 impl_name = "Bash"
+                event_type = stem[5:]  # Remove "bash_" prefix
+            elif stem.startswith("rust_"):
+                impl_name = "Rust"
+                event_type = stem[5:]  # Remove "rust_" prefix
+            elif "vibecraft-hook.sh" in command:
+                impl_name = "Bash"
+                event_type = stem
             elif "/rust/" in command:
                 impl_name = "Rust"
+                event_type = stem
             else:
                 continue
 

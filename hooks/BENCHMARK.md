@@ -2,13 +2,13 @@
 
 ## Summary
 
-The Rust hook provides **7-10x faster** event processing compared to the bash script.
+The Rust hook provides **7-11x faster** event processing compared to the bash script.
 
 ![Performance Chart](benchmark/performance-chart.png)
 
 | Metric | Bash | Rust | Improvement |
 |--------|------|------|-------------|
-| Mean latency | ~30-37ms | ~3-4ms | **~10x faster** |
+| Mean latency | ~29-41ms | ~2.9-4.5ms | **~8-11x faster** |
 | User CPU time | ~15-16ms | ~2ms | **~8x less** |
 | System time | ~17-18ms | ~2ms | **~9x less** |
 | Binary size | N/A (uses jq) | 1.8MB | Standalone |
@@ -19,57 +19,57 @@ The Rust hook provides **7-10x faster** event processing compared to the bash sc
 
 | Event Type | Bash (ms) | Rust (ms) | Speedup |
 |------------|-----------|-----------|---------|
-| Post Tool Use | 37.8 ± 0.9 | 3.7 ± 0.4 | **10.1x** |
-| Pre Tool Use | 35.6 ± 1.1 | 3.6 ± 0.3 | **9.9x** |
-| Notification | 29.7 ± 0.5 | 3.6 ± 0.6 | **8.2x** |
-| Stop | 30.9 ± 1.3 | 3.8 ± 0.5 | **8.1x** |
-| Pre Compact | 31.9 ± 2.1 | 4.0 ± 0.3 | **7.9x** |
-| Subagent Stop | 30.7 ± 1.1 | 3.9 ± 0.5 | **7.8x** |
-| User Prompt Submit | 27.8 ± 1.2 | 3.7 ± 0.5 | **7.6x** |
-| Session End | 27.8 ± 0.8 | 3.7 ± 0.4 | **7.5x** |
-| Session Start | 27.7 ± 1.1 | 3.8 ± 0.3 | **7.3x** |
+| Stop | 32.8 ± 2.5 | 2.9 ± 0.6 | **11.2x** |
+| Session End | 39.3 ± 30.4 | 3.6 ± 0.3 | **11.0x** |
+| Post Tool Use | 40.6 ± 1.5 | 4.1 ± 0.3 | **9.8x** |
+| Notification | 31.9 ± 1.2 | 3.5 ± 0.6 | **9.1x** |
+| Subagent Stop | 33.7 ± 3.4 | 3.7 ± 0.2 | **9.1x** |
+| Pre Tool Use | 38.6 ± 1.9 | 4.5 ± 1.1 | **8.5x** |
+| Pre Compact | 32.5 ± 1.1 | 3.9 ± 0.9 | **8.3x** |
+| User Prompt Submit | 30.8 ± 3.7 | 4.0 ± 0.4 | **7.6x** |
+| Session Start | 29.1 ± 1.2 | 4.0 ± 0.7 | **7.4x** |
 
 ### Individual Event Breakdowns
 
 #### Pre-Tool Use Event
 ```
-Bash:   35.6 ms ±  1.1 ms
-Rust:    3.6 ms ±  0.3 ms
-Speedup: 9.9x
+Bash:   38.6 ms ±  1.9 ms
+Rust:    4.5 ms ±  1.1 ms
+Speedup: 8.5x
 ```
 
 #### Post-Tool Use Event
 ```
-Bash:   37.8 ms ±  0.9 ms
-Rust:    3.7 ms ±  0.4 ms
-Speedup: 10.1x
+Bash:   40.6 ms ±  1.5 ms
+Rust:    4.1 ms ±  0.3 ms
+Speedup: 9.8x
 ```
 
 #### Stop Event
 ```
-Bash:   30.9 ms ±  1.3 ms
-Rust:    3.8 ms ±  0.5 ms
-Speedup: 8.1x
+Bash:   32.8 ms ±  2.5 ms
+Rust:    2.9 ms ±  0.6 ms
+Speedup: 11.2x
 ```
 
 #### Session Start Event
 ```
-Bash:   27.7 ms ±  1.1 ms
-Rust:    3.8 ms ±  0.3 ms
-Speedup: 7.3x
+Bash:   29.1 ms ±  1.2 ms
+Rust:    4.0 ms ±  0.7 ms
+Speedup: 7.4x
 ```
 
 #### Notification Event
 ```
-Bash:   29.7 ms ±  0.5 ms
-Rust:    3.6 ms ±  0.6 ms
-Speedup: 8.2x
+Bash:   31.9 ms ±  1.2 ms
+Rust:    3.5 ms ±  0.6 ms
+Speedup: 9.1x
 ```
 
 #### User Prompt Submit Event
 ```
-Bash:   27.8 ms ±  1.2 ms
-Rust:    3.7 ms ±  0.5 ms
+Bash:   30.8 ms ±  3.7 ms
+Rust:    4.0 ms ±  0.4 ms
 Speedup: 7.6x
 ```
 
