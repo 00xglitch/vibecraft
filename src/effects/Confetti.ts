@@ -242,6 +242,11 @@ export class ConfettiSystem {
 let confettiInstance: ConfettiSystem | null = null
 
 export function getConfettiSystem(scene: THREE.Scene): ConfettiSystem {
+  // Check if scene changed - if so, dispose old instance and create new one
+  if (confettiInstance && confettiInstance['scene'] !== scene) {
+    confettiInstance.dispose()
+    confettiInstance = null
+  }
   if (!confettiInstance) {
     confettiInstance = new ConfettiSystem(scene)
   }

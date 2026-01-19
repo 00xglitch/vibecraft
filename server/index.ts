@@ -771,10 +771,17 @@ async function createSession(options: CreateSessionRequest = {}): Promise<Manage
   const cwd = validateDirectoryPath(options.cwd || process.cwd())
 
   // Detect project name from cwd (for auto-naming and display)
-  const projectInfo = await detectProjectName(cwd)
+  let projectInfo: Awaited<ReturnType<typeof detectProjectName>> | null = null
+  try {
+    projectInfo = await detectProjectName(cwd)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    log(`Error detecting project name for cwd "${cwd}": ${message}`)
+    // Continue with null projectInfo rather than failing session creation
+  }
 
   // Use user-provided name, or detected project name, or fallback to counter
-  const name = options.name || projectInfo.name || `Claude ${sessionCounter}`
+  const name = options.name || projectInfo?.name || `Claude ${sessionCounter}`
 
   // Build claude command with flags
   const flags = options.flags || {}
@@ -820,12 +827,12 @@ async function createSession(options: CreateSessionRequest = {}): Promise<Manage
         createdAt: Date.now(),
         lastActivity: Date.now(),
         cwd,
-        projectName: projectInfo.name,
-        projectSource: projectInfo.source,
+        projectName: projectInfo?.name,
+        projectSource: projectInfo?.source,
       }
 
       managedSessions.set(id, session)
-      log(`Created session: ${name} (${id.slice(0, 8)}) -> tmux:${tmuxSession} project:${projectInfo.name} (${projectInfo.source})`)
+      log(`Created session: ${name} (${id.slice(0, 8)}) -> tmux:${tmuxSession} project:${projectInfo?.name ?? 'unknown'} (${projectInfo?.source ?? 'none'})`)
 
       // Track git status for this session
       if (cwd) {

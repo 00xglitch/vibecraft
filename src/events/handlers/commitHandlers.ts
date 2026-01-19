@@ -29,14 +29,22 @@ function isGitCommit(command: string): boolean {
 /**
  * Extract commit message from bash command
  * Matches: git commit -m "message" or git commit -m 'message'
+ * Handles escaped quotes within the message (e.g., "Fix \"bug\" here")
  */
 function extractCommitMessage(command: string): string | null {
-  // Match -m "message" or -m 'message' (handles escaped quotes too)
-  const doubleQuoteMatch = command.match(/git\s+commit\s+.*-m\s+"([^"]+)"/)
-  if (doubleQuoteMatch) return doubleQuoteMatch[1]
+  // Match -m "message" with support for escaped quotes
+  // Pattern: (?:[^"\\]|\\.)* matches any non-quote/non-backslash char, OR any escaped char
+  const doubleQuoteMatch = command.match(/git\s+commit\s+.*-m\s+"((?:[^"\\]|\\.)*)"/)
+  if (doubleQuoteMatch) {
+    // Unescape the matched content
+    return doubleQuoteMatch[1].replace(/\\(.)/g, '$1')
+  }
 
-  const singleQuoteMatch = command.match(/git\s+commit\s+.*-m\s+'([^']+)'/)
-  if (singleQuoteMatch) return singleQuoteMatch[1]
+  // Match -m 'message' with support for escaped quotes
+  const singleQuoteMatch = command.match(/git\s+commit\s+.*-m\s+'((?:[^'\\]|\\.)*)'/)
+  if (singleQuoteMatch) {
+    return singleQuoteMatch[1].replace(/\\(.)/g, '$1')
+  }
 
   // Match heredoc style: -m "$(cat <<'EOF'...
   // These are complex, just return null for now

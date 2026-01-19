@@ -48,19 +48,32 @@ export async function detectProjectName(cwd: string): Promise<ProjectInfo> {
   }
 
   // Try pyproject.toml (Python projects)
+  // Note: Using simple regex parsing. For complex TOML with nested tables,
+  // consider using a proper TOML parser like @iarna/toml.
   const pyprojectPath = join(cwd, 'pyproject.toml')
   if (existsSync(pyprojectPath)) {
     try {
       const content = readFileSync(pyprojectPath, 'utf-8')
-      // Simple TOML parsing for [project].name or [tool.poetry].name
-      // Matches: name = "project-name" or name = 'project-name'
-      const projectMatch = content.match(/^\[project\][^[]*?name\s*=\s*["']([^"']+)["']/ms)
-      if (projectMatch) {
-        return { name: projectMatch[1], source: 'pyproject.toml' }
+
+      // First, isolate the [project] section (up to the next section header)
+      // Pattern: [project] followed by lines that don't start a new section
+      const projectSectionMatch = content.match(/^\[project\](?:\r?\n(?!\[).*)*$/m)
+      if (projectSectionMatch) {
+        const projectSection = projectSectionMatch[0]
+        const projectNameMatch = projectSection.match(/^\s*name\s*=\s*["']([^"']+)["']/m)
+        if (projectNameMatch) {
+          return { name: projectNameMatch[1], source: 'pyproject.toml' }
+        }
       }
-      const poetryMatch = content.match(/^\[tool\.poetry\][^[]*?name\s*=\s*["']([^"']+)["']/ms)
-      if (poetryMatch) {
-        return { name: poetryMatch[1], source: 'pyproject.toml' }
+
+      // Next, isolate the [tool.poetry] section and search for name within it
+      const poetrySectionMatch = content.match(/^\[tool\.poetry\](?:\r?\n(?!\[).*)*$/m)
+      if (poetrySectionMatch) {
+        const poetrySection = poetrySectionMatch[0]
+        const poetryNameMatch = poetrySection.match(/^\s*name\s*=\s*["']([^"']+)["']/m)
+        if (poetryNameMatch) {
+          return { name: poetryNameMatch[1], source: 'pyproject.toml' }
+        }
       }
     } catch {
       // Ignore parse errors, try next source
