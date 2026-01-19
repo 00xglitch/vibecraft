@@ -369,6 +369,7 @@ interface SessionFlags {
   continue?: boolean
   skipPermissions?: boolean
   chrome?: boolean
+  worktree?: boolean
 }
 
 async function createManagedSession(
@@ -621,6 +622,15 @@ function setupManagedSessions(): void {
     })
   }
 
+  // Toggle worktree hint visibility when checkbox changes
+  const worktreeCheck = document.getElementById('session-opt-worktree') as HTMLInputElement
+  const worktreeHint = document.getElementById('worktree-hint')
+  if (worktreeCheck && worktreeHint) {
+    worktreeCheck.addEventListener('change', () => {
+      worktreeHint.style.display = worktreeCheck.checked ? 'block' : 'none'
+    })
+  }
+
   const closeModal = (): void => {
     modal?.classList.remove('visible')
     currentModalHint = null  // Clear hint when modal closes
@@ -634,11 +644,13 @@ function setupManagedSessions(): void {
     const continueCheck = document.getElementById('session-opt-continue') as HTMLInputElement
     const skipPermsCheck = document.getElementById('session-opt-skip-perms') as HTMLInputElement
     const chromeCheck = document.getElementById('session-opt-chrome') as HTMLInputElement
+    const worktreeCheck = document.getElementById('session-opt-worktree') as HTMLInputElement
 
     const flags: SessionFlags = {
       continue: continueCheck?.checked ?? true,
       skipPermissions: skipPermsCheck?.checked ?? true,
       chrome: chromeCheck?.checked ?? false,
+      worktree: worktreeCheck?.checked ?? false,
     }
 
     // Capture hint before closing modal (closeModal clears it)

@@ -87,6 +87,7 @@ const DEBUG = process.env.VIBECRAFT_DEBUG === 'true'
 const TMUX_SESSION = process.env.VIBECRAFT_TMUX_SESSION ?? DEFAULTS.TMUX_SESSION
 const SESSIONS_FILE = resolve(expandHome(process.env.VIBECRAFT_SESSIONS_FILE ?? DEFAULTS.SESSIONS_FILE))
 const TILES_FILE = resolve(expandHome(process.env.VIBECRAFT_TILES_FILE ?? '~/.vibecraft/data/tiles.json'))
+const WORKTREES_DIR = resolve(expandHome('~/.vibecraft/worktrees'))
 
 /** Time before a "working" session auto-transitions to idle (failsafe for missed events) */
 const WORKING_TIMEOUT_MS = 120_000 // 2 minutes
@@ -192,6 +193,114 @@ function execFileAsync(cmd: string, args: string[]): Promise<void> {
       else resolve()
     })
   })
+}
+
+/**
+ * Promisified exec helper that returns stdout
+ */
+function execAsync(cmd: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    exec(cmd, EXEC_OPTIONS, (error, stdout) => {
+      if (error) reject(error)
+      else resolve(stdout.toString().trim())
+    })
+  })
+}
+
+/**
+ * Check if a directory is a git repository
+ */
+async function isGitRepo(dir: string): Promise<boolean> {
+  try {
+    await execAsync(`git -C "${dir}" rev-parse --git-dir`)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Create a git worktree for isolated session work
+ * @param originalRepo - Path to the original git repository
+ * @param sessionId - Session ID (used for worktree directory and branch name)
+ * @param sessionName - Human-readable session name (used in branch name)
+ * @returns Worktree info or null if creation fails
+ */
+async function createWorktree(
+  originalRepo: string,
+  sessionId: string,
+  sessionName: string
+): Promise<{ path: string; branch: string; originalRepo: string } | null> {
+  try {
+    // Ensure worktrees directory exists
+    if (!existsSync(WORKTREES_DIR)) {
+      mkdirSync(WORKTREES_DIR, { recursive: true })
+    }
+
+    // Create safe branch name from session name (lowercase, replace spaces with hyphens)
+    const safeName = sessionName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+    const shortId = sessionId.slice(0, 8)
+    const branchName = `vibecraft/${safeName}-${shortId}`
+    const worktreePath = join(WORKTREES_DIR, sessionId)
+
+    // Check if worktree path already exists
+    if (existsSync(worktreePath)) {
+      log(`Worktree path already exists: ${worktreePath}`)
+      return null
+    }
+
+    // Create the worktree with a new branch
+    // -b creates a new branch, -d allows creating from detached HEAD
+    await execAsync(`git -C "${originalRepo}" worktree add -b "${branchName}" "${worktreePath}"`)
+
+    log(`Created worktree: ${worktreePath} on branch ${branchName}`)
+    return {
+      path: worktreePath,
+      branch: branchName,
+      originalRepo,
+    }
+  } catch (error) {
+    log(`Failed to create worktree: ${error instanceof Error ? error.message : String(error)}`)
+    return null
+  }
+}
+
+/**
+ * Remove a git worktree
+ * @param worktreePath - Path to the worktree directory
+ * @param originalRepo - Path to the original repository (for git worktree remove)
+ * @param branchName - Branch name to delete after removing worktree
+ */
+async function removeWorktree(
+  worktreePath: string,
+  originalRepo: string,
+  branchName: string
+): Promise<void> {
+  try {
+    // Remove the worktree
+    await execAsync(`git -C "${originalRepo}" worktree remove "${worktreePath}" --force`)
+    log(`Removed worktree: ${worktreePath}`)
+
+    // Delete the branch (optional, user might want to keep it)
+    try {
+      await execAsync(`git -C "${originalRepo}" branch -D "${branchName}"`)
+      log(`Deleted branch: ${branchName}`)
+    } catch {
+      // Branch deletion is optional - might fail if it has unmerged changes
+      log(`Could not delete branch ${branchName} (may have unmerged changes)`)
+    }
+  } catch (error) {
+    log(`Failed to remove worktree: ${error instanceof Error ? error.message : String(error)}`)
+    // Try to clean up the directory manually if git worktree remove fails
+    try {
+      if (existsSync(worktreePath)) {
+        await execAsync(`rm -rf "${worktreePath}"`)
+        log(`Manually cleaned up worktree directory: ${worktreePath}`)
+      }
+    } catch {
+      // Ignore cleanup errors
+    }
+  }
 }
 
 /**
@@ -761,44 +870,67 @@ function shortId(): string {
 /**
  * Create a new managed session
  */
-function createSession(options: CreateSessionRequest = {}): Promise<ManagedSession> {
+async function createSession(options: CreateSessionRequest = {}): Promise<ManagedSession> {
+  const id = randomUUID()
+  sessionCounter++
+  const name = options.name || `Claude ${sessionCounter}`
+  const tmuxSession = `vibecraft-${shortId()}`
+
+  // Validate cwd to prevent command injection
+  let cwd: string
+  try {
+    cwd = validateDirectoryPath(options.cwd || process.cwd())
+  } catch (err) {
+    throw err
+  }
+
+  // Store original cwd for reference
+  const originalCwd = cwd
+
+  // Handle worktree creation if requested
+  const flags = options.flags || {}
+  let worktreeInfo: { path: string; branch: string; originalRepo: string } | undefined
+
+  if (flags.worktree) {
+    // Check if directory is a git repo
+    const isRepo = await isGitRepo(cwd)
+    if (!isRepo) {
+      throw new Error(`Cannot create worktree: ${cwd} is not a git repository`)
+    }
+
+    // Create worktree
+    const worktree = await createWorktree(cwd, id, name)
+    if (!worktree) {
+      throw new Error(`Failed to create worktree for ${cwd}`)
+    }
+
+    // Use worktree path as the working directory
+    worktreeInfo = worktree
+    cwd = worktree.path
+    log(`Session will use worktree: ${cwd} (branch: ${worktree.branch})`)
+  }
+
+  // Build claude command with flags
+  const claudeArgs: string[] = []
+
+  // Defaults: continue=true, skipPermissions=true, chrome=false
+  if (flags.continue !== false) {
+    claudeArgs.push('-c')
+  }
+  if (flags.skipPermissions !== false) {
+    // --permission-mode=bypassPermissions skips the workspace trust dialog
+    // --dangerously-skip-permissions skips tool permission prompts
+    claudeArgs.push('--permission-mode=bypassPermissions')
+    claudeArgs.push('--dangerously-skip-permissions')
+  }
+  if (flags.chrome) {
+    claudeArgs.push('--chrome')
+  }
+
+  const claudeCmd = claudeArgs.length > 0 ? `claude ${claudeArgs.join(' ')}` : 'claude'
+
+  // Spawn tmux session with claude using execFile to prevent shell injection
   return new Promise((resolve, reject) => {
-    const id = randomUUID()
-    sessionCounter++
-    const name = options.name || `Claude ${sessionCounter}`
-    const tmuxSession = `vibecraft-${shortId()}`
-
-    // Validate cwd to prevent command injection
-    let cwd: string
-    try {
-      cwd = validateDirectoryPath(options.cwd || process.cwd())
-    } catch (err) {
-      reject(err)
-      return
-    }
-
-    // Build claude command with flags
-    const flags = options.flags || {}
-    const claudeArgs: string[] = []
-
-    // Defaults: continue=true, skipPermissions=true, chrome=false
-    if (flags.continue !== false) {
-      claudeArgs.push('-c')
-    }
-    if (flags.skipPermissions !== false) {
-      // --permission-mode=bypassPermissions skips the workspace trust dialog
-      // --dangerously-skip-permissions skips tool permission prompts
-      claudeArgs.push('--permission-mode=bypassPermissions')
-      claudeArgs.push('--dangerously-skip-permissions')
-    }
-    if (flags.chrome) {
-      claudeArgs.push('--chrome')
-    }
-
-    const claudeCmd = claudeArgs.length > 0 ? `claude ${claudeArgs.join(' ')}` : 'claude'
-
-    // Spawn tmux session with claude using execFile to prevent shell injection
-    // Arguments are passed as array, not interpolated into a shell string
     execFile('tmux', [
       'new-session',
       '-d',
@@ -808,6 +940,11 @@ function createSession(options: CreateSessionRequest = {}): Promise<ManagedSessi
     ], EXEC_OPTIONS, (error) => {
       if (error) {
         log(`Failed to spawn session: ${error.message}`)
+        // Clean up worktree if session spawn failed
+        if (worktreeInfo) {
+          removeWorktree(worktreeInfo.path, worktreeInfo.originalRepo, worktreeInfo.branch)
+            .catch(() => {}) // Ignore cleanup errors
+        }
         reject(new Error(`Failed to spawn session: ${error.message}`))
         return
       }
@@ -820,16 +957,17 @@ function createSession(options: CreateSessionRequest = {}): Promise<ManagedSessi
         createdAt: Date.now(),
         lastActivity: Date.now(),
         cwd,
+        worktree: worktreeInfo,
       }
 
       managedSessions.set(id, session)
-      log(`Created session: ${name} (${id.slice(0, 8)}) -> tmux:${tmuxSession} cmd:'${claudeCmd}'`)
+      log(`Created session: ${name} (${id.slice(0, 8)}) -> tmux:${tmuxSession} cmd:'${claudeCmd}'${worktreeInfo ? ` [worktree: ${worktreeInfo.branch}]` : ''}`)
 
       // Track git status for this session
       if (cwd) {
         gitStatusManager.track(id, cwd)
-        // Remember this directory for future autocomplete
-        projectsManager.addProject(cwd, name)
+        // Remember the original directory for future autocomplete (not the worktree)
+        projectsManager.addProject(originalCwd, name)
       }
 
       // Broadcast and persist
@@ -881,26 +1019,34 @@ function updateSession(id: string, updates: UpdateSessionRequest): ManagedSessio
 /**
  * Delete/kill a session
  */
-function deleteSession(id: string): Promise<boolean> {
+async function deleteSession(id: string): Promise<boolean> {
+  const session = managedSessions.get(id)
+  if (!session) {
+    return false
+  }
+
+  // Kill the tmux session using execFile to prevent shell injection
+  try {
+    validateTmuxSession(session.tmuxSession)
+  } catch {
+    log(`Invalid tmux session name: ${session.tmuxSession}`)
+    return false
+  }
+
   return new Promise((resolve) => {
-    const session = managedSessions.get(id)
-    if (!session) {
-      resolve(false)
-      return
-    }
-
-    // Kill the tmux session using execFile to prevent shell injection
-    try {
-      validateTmuxSession(session.tmuxSession)
-    } catch {
-      log(`Invalid tmux session name: ${session.tmuxSession}`)
-      resolve(false)
-      return
-    }
-
-    execFile('tmux', ['kill-session', '-t', session.tmuxSession], EXEC_OPTIONS, (error) => {
+    execFile('tmux', ['kill-session', '-t', session.tmuxSession], EXEC_OPTIONS, async (error) => {
       if (error) {
         log(`Warning: Failed to kill tmux session: ${error.message}`)
+      }
+
+      // Clean up worktree if this session used one
+      if (session.worktree) {
+        log(`Cleaning up worktree for session ${session.name}...`)
+        await removeWorktree(
+          session.worktree.path,
+          session.worktree.originalRepo,
+          session.worktree.branch
+        )
       }
 
       managedSessions.delete(id)
@@ -912,7 +1058,7 @@ function deleteSession(id: string): Promise<boolean> {
         }
       }
 
-      log(`Deleted session: ${session.name} (${id.slice(0, 8)})`)
+      log(`Deleted session: ${session.name} (${id.slice(0, 8)})${session.worktree ? ' [worktree cleaned up]' : ''}`)
       broadcastSessions()
       saveSessions()
       resolve(true)

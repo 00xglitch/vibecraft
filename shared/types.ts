@@ -295,6 +295,15 @@ export interface ManagedSession {
     q: number
     r: number
   }
+  /** Git worktree info (if session uses isolated worktree) */
+  worktree?: {
+    /** Path to the worktree directory */
+    path: string
+    /** Branch name created for this worktree */
+    branch: string
+    /** Original repository path */
+    originalRepo: string
+  }
 }
 
 /** Git repository status */
@@ -356,6 +365,7 @@ export interface CreateSessionRequest {
     continue?: boolean        // -c (continue last conversation)
     skipPermissions?: boolean  // --dangerously-skip-permissions
     chrome?: boolean        // --chrome
+    worktree?: boolean       // Create isolated git worktree
   }
 }
 
