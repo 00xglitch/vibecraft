@@ -8,9 +8,11 @@
 import './styles/index.css'
 import * as THREE from 'three'
 import { WorkshopScene, ZONE_COLORS, type Zone, type CameraMode } from './scene/WorkshopScene'
-// Character model - swap by changing the import:
+// Character models
 // import { Claude } from './entities/Claude'      // Original simple character
 import { Claude } from './entities/ClaudeMon'      // Robot buddy character
+import { Flower } from './entities/Flower'          // Flower head character
+import type { ICharacter, CharacterOptions } from './entities/ICharacter'
 import { SubagentManager } from './entities/SubagentManager'
 import { EventClient } from './events/EventClient'
 import { eventBus, type EventContext, type EventType } from './events/EventBus'
@@ -96,12 +98,34 @@ const API_URL = import.meta.env.DEV
 const sessionAPI = createSessionAPI(API_URL)
 
 // ============================================================================
+// Character Factory
+// ============================================================================
+
+/**
+ * Get the selected character type from settings
+ */
+function getSelectedCharacterType(): string {
+  return localStorage.getItem('vibecraft-character') || 'robot'
+}
+
+/**
+ * Create the appropriate character based on settings
+ */
+function createCharacter(scene: WorkshopScene, options: CharacterOptions): ICharacter {
+  const characterType = getSelectedCharacterType()
+  if (characterType === 'flower') {
+    return new Flower(scene, options)
+  }
+  return new Claude(scene, options)
+}
+
+// ============================================================================
 // State
 // ============================================================================
 
 /** Per-session state */
 interface SessionState {
-  claude: Claude
+  claude: ICharacter
   subagents: SubagentManager
   zone: Zone
   color: number
@@ -1242,7 +1266,7 @@ function setupDevPanel(): void {
   if (!devPanel || !animationsContainer) return
 
   // Helper to get target Claude
-  const getTargetClaude = (): InstanceType<typeof Claude> | null => {
+  const getTargetClaude = (): ICharacter | null => {
     if (state.focusedSessionId) {
       const claude = state.sessions.get(state.focusedSessionId)?.claude
       if (claude) return claude
@@ -1255,7 +1279,7 @@ function setupDevPanel(): void {
 
   // We need to wait for a session to exist to get the behavior names
   const checkForSession = () => {
-    let claude: InstanceType<typeof Claude> | null = null
+    let claude: ICharacter | null = null
     for (const session of state.sessions.values()) {
       claude = session.claude
       break
@@ -1274,13 +1298,15 @@ function setupDevPanel(): void {
     idleHeader.textContent = 'Idle'
     animationsContainer.appendChild(idleHeader)
 
-    const behaviors = claude.getIdleBehaviorNames()
+    // Dev panel uses Claude-specific methods (cast for dev-only functionality)
+    const claudeRef = claude as Claude
+    const behaviors = claudeRef.getIdleBehaviorNames()
     for (const name of behaviors) {
       const btn = document.createElement('button')
       btn.className = 'dev-anim-btn'
       btn.textContent = name
       btn.addEventListener('click', () => {
-        const target = getTargetClaude()
+        const target = getTargetClaude() as Claude | null
         if (target) {
           target.playIdleBehavior(name)
           document.querySelectorAll('.dev-anim-btn').forEach(b => b.classList.remove('playing'))
@@ -1297,13 +1323,13 @@ function setupDevPanel(): void {
     workingHeader.textContent = 'Working (by station)'
     animationsContainer.appendChild(workingHeader)
 
-    const stations = claude.getWorkingBehaviorStations()
+    const stations = claudeRef.getWorkingBehaviorStations()
     for (const station of stations) {
       const btn = document.createElement('button')
       btn.className = 'dev-anim-btn dev-anim-btn-working'
       btn.textContent = station
       btn.addEventListener('click', () => {
-        const target = getTargetClaude()
+        const target = getTargetClaude() as Claude | null
         if (target) {
           target.playWorkingBehavior(station)
           document.querySelectorAll('.dev-anim-btn').forEach(b => b.classList.remove('playing'))
@@ -1421,8 +1447,8 @@ function getOrCreateSession(sessionId: string): SessionState | null {
     }
   }
 
-  // Create Claude with matching color, positioned at zone center
-  const claude = new Claude(state.scene, {
+  // Create character with matching color, positioned at zone center
+  const claude = createCharacter(state.scene, {
     color: zone.color,
     startStation: 'center',
   })
@@ -2262,6 +2288,7 @@ function setupSettingsModal(): void {
   const volumeValue = document.getElementById('settings-volume-value')
   const spatialCheckbox = document.getElementById('settings-spatial-audio') as HTMLInputElement | null
   const streamingCheckbox = document.getElementById('settings-streaming-mode') as HTMLInputElement | null
+  const characterSelect = document.getElementById('settings-character') as HTMLSelectElement | null
   const gridSizeSlider = document.getElementById('settings-grid-size') as HTMLInputElement | null
   const gridSizeValue = document.getElementById('settings-grid-size-value')
   const refreshBtn = document.getElementById('settings-refresh-sessions')
@@ -2322,6 +2349,12 @@ function setupSettingsModal(): void {
     applyStreamingMode(enabled)
   }
 
+  // Load saved character setting from localStorage
+  const savedCharacter = localStorage.getItem('vibecraft-character')
+  if (savedCharacter !== null) {
+    if (characterSelect) characterSelect.value = savedCharacter
+  }
+
   // Apply streaming mode (hide/show username)
   function applyStreamingMode(enabled: boolean) {
     const usernameEl = document.getElementById('username')
@@ -2356,6 +2389,10 @@ function setupSettingsModal(): void {
     // Sync streaming mode checkbox
     if (streamingCheckbox) {
       streamingCheckbox.checked = localStorage.getItem('vibecraft-streaming-mode') === 'true'
+    }
+    // Sync character select
+    if (characterSelect) {
+      characterSelect.value = localStorage.getItem('vibecraft-character') || 'robot'
     }
     // Sync port input
     if (portInput) portInput.value = String(AGENT_PORT)
@@ -2411,6 +2448,44 @@ function setupSettingsModal(): void {
     const enabled = streamingCheckbox.checked
     localStorage.setItem('vibecraft-streaming-mode', String(enabled))
     applyStreamingMode(enabled)
+  })
+
+  // Character select - instantly swap all characters
+  characterSelect?.addEventListener('change', () => {
+    localStorage.setItem('vibecraft-character', characterSelect.value)
+
+    // Swap all existing characters to the new type
+    if (state.scene) {
+      for (const [sessionId, session] of state.sessions) {
+        // Save current character state
+        const oldCharacter = session.claude
+        const position = oldCharacter.mesh.position.clone()
+        const rotation = oldCharacter.mesh.rotation.clone()
+        const currentState = oldCharacter.state
+        const currentStation = oldCharacter.currentStation
+
+        // Dispose old character
+        oldCharacter.dispose()
+
+        // Create new character of selected type
+        const newCharacter = createCharacter(state.scene, {
+          color: session.color,
+          startStation: currentStation,
+        })
+
+        // Restore position and rotation
+        newCharacter.mesh.position.copy(position)
+        newCharacter.mesh.rotation.copy(rotation)
+
+        // Restore state
+        if (currentState !== 'idle') {
+          newCharacter.setState(currentState)
+        }
+
+        // Update session reference
+        session.claude = newCharacter
+      }
+    }
   })
 
   // Port change - save to localStorage and prompt refresh
@@ -2715,8 +2790,8 @@ function init() {
             soundManager.play('zone_create', { zoneId: session.claudeSessionId })
           }
 
-          // Create Claude entity for this zone
-          const claude = new Claude(state.scene, {
+          // Create character entity for this zone
+          const claude = createCharacter(state.scene, {
             color: zone.color,
             startStation: 'center',
           })
