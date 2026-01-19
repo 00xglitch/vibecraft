@@ -295,6 +295,8 @@ export interface ManagedSession {
     q: number
     r: number
   }
+  /** Whether this is an implicit session (external Claude, no tmux control) */
+  implicit?: boolean
 }
 
 /** Git repository status */
@@ -357,6 +359,14 @@ export interface CreateSessionRequest {
     skipPermissions?: boolean  // --dangerously-skip-permissions
     chrome?: boolean        // --chrome
   }
+}
+
+/** Request to create an implicit session (external Claude, no tmux control) */
+export interface CreateImplicitSessionRequest {
+  /** Claude Code session ID from events */
+  claudeSessionId: string
+  /** Working directory (from event cwd) */
+  cwd?: string
 }
 
 /** Request to update a session */

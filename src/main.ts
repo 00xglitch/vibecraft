@@ -223,7 +223,8 @@ function renderManagedSessions(): void {
 
     const statusClass = session.status
     const hotkey = index < 6 ? getSessionKeybind(index) : '' // 1-6 shown in UI
-    const isImplicit = session.id.startsWith('implicit-')
+    // Implicit sessions (external Claude) can't be renamed/deleted/restarted via tmux
+    const isImplicit = session.implicit === true
 
     // Time since last activity (needed for detail line)
     const lastActive = session.lastActivity
@@ -259,7 +260,7 @@ function renderManagedSessions(): void {
     const tooltipParts = [
       `Name: ${session.name}`,
       `Status: ${session.status}`,
-      isImplicit ? 'External session (not spawned by Vibecraft)' : `tmux: ${session.tmuxSession}`,
+      session.implicit ? '🔗 External Claude (no tmux control)' : `tmux: ${session.tmuxSession}`,
       session.claudeSessionId ? `Claude ID: ${session.claudeSessionId.slice(0, 12)}...` : 'Not linked yet',
       session.cwd ? `Dir: ${session.cwd}` : '',
       session.lastActivity ? `Last active: ${new Date(session.lastActivity).toLocaleString()}` : '',
@@ -271,14 +272,17 @@ function renderManagedSessions(): void {
       ${hotkey ? `<div class="session-hotkey">${hotkey}</div>` : ''}
       <div class="session-status ${statusClass}"></div>
       <div class="session-info">
-        <div class="session-name">${escapeHtml(session.name)}${isImplicit ? ' <span class="external-badge">ext</span>' : ''}</div>
+        <div class="session-name">
+          ${escapeHtml(session.name)}
+          ${isImplicit ? '<span class="session-badge external" title="External Claude session (no tmux control)">ext</span>' : ''}
+        </div>
         <div class="${detailClass}">${detail}${!needsAttention && session.status !== 'offline' && lastActive ? ` · ${lastActive}` : ''}</div>
         ${truncatedPrompt ? `<div class="session-prompt">💬 ${escapeHtml(truncatedPrompt)}</div>` : ''}
       </div>
       <div class="session-actions">
-        ${!isImplicit && session.status === 'offline' ? `<button class="restart-btn" title="Restart session">🔄</button>` : ''}
-        <button class="rename-btn" title="Rename">✏️</button>
-        <button class="delete-btn" title="Delete">🗑️</button>
+        ${session.status === 'offline' && !isImplicit ? `<button class="restart-btn" title="Restart session">🔄</button>` : ''}
+        ${!isImplicit ? `<button class="rename-btn" title="Rename">✏️</button>` : ''}
+        <button class="delete-btn" title="${isImplicit ? 'Remove from list' : 'Delete'}">🗑️</button>
       </div>
     `
 
@@ -301,7 +305,10 @@ function renderManagedSessions(): void {
     // Delete button
     el.querySelector('.delete-btn')?.addEventListener('click', (e) => {
       e.stopPropagation()
-      if (confirm(`Delete session "${session.name}"?`)) {
+      const confirmMsg = isImplicit
+        ? `Remove "${session.name}" from the list? (This won't affect the external Claude session)`
+        : `Delete session "${session.name}"?`
+      if (confirm(confirmMsg)) {
         deleteManagedSession(session.id)
       }
     })
@@ -1340,11 +1347,15 @@ function setupDevPanel(): void {
 /**
  * Get or create a session for a given sessionId
  * Returns null if the session can't be linked to a managed session
+ * If an unlinked session arrives, creates an implicit session on the server
  */
 /** Map Claude sessionIds to managed session IDs */
 const claudeToManagedLink = new Map<string, string>()
 
-function getOrCreateSession(sessionId: string, cwd?: string): SessionState | null {
+/** Track pending implicit session creations to avoid duplicate requests */
+const pendingImplicitCreations = new Set<string>()
+
+function getOrCreateSession(sessionId: string, eventCwd?: string): SessionState | null {
   let session = state.sessions.get(sessionId)
   if (session) return session
 
@@ -1355,10 +1366,37 @@ function getOrCreateSession(sessionId: string, cwd?: string): SessionState | nul
   // Try to link to an existing managed session first
   let linkedManagedSession = tryLinkToManagedSession(sessionId)
 
-  // If no existing managed session, create an implicit one for this external Claude
+  // If no existing managed session, check if server needs to create an implicit one
   if (!linkedManagedSession) {
-    console.log(`Creating implicit managed session for external Claude ${sessionId.slice(0, 8)}`)
-    linkedManagedSession = createImplicitManagedSession(sessionId, cwd)
+    // Check if this session is already known to any managed session (including implicit ones)
+    const alreadyKnown = state.managedSessions.some(m => m.claudeSessionId === sessionId)
+    if (!alreadyKnown) {
+      // Unlinked external session - create an implicit session on the server
+      // The server will broadcast the new session, and subsequent events will link properly
+      if (!pendingImplicitCreations.has(sessionId)) {
+        pendingImplicitCreations.add(sessionId)
+        console.log(`Creating implicit session for external Claude ${sessionId.slice(0, 8)}`)
+        sessionAPI.createImplicitSession(sessionId, eventCwd).then(result => {
+          pendingImplicitCreations.delete(sessionId)
+          if (!result.ok) {
+            console.error(`Failed to create implicit session: ${result.error}`)
+          }
+          // Server will broadcast sessions, which will trigger zone creation
+        })
+      }
+      return null
+    }
+    // Session is known (from server broadcast) but not yet linked locally
+    // Try to find and link it
+    const managed = state.managedSessions.find(m => m.claudeSessionId === sessionId)
+    if (managed) {
+      claudeToManagedLink.set(sessionId, managed.id)
+      linkedManagedSession = managed
+    } else {
+      // Shouldn't happen, but handle gracefully
+      console.log(`Session ${sessionId.slice(0, 8)} known but not found, waiting...`)
+      return null
+    }
   }
 
   // Look up hint position: first check saved zone position, then pending hints
@@ -1738,7 +1776,8 @@ function updateStats() {
 
 function handleEvent(event: ClaudeEvent) {
   // Get or create session for this event
-  // Creates implicit managed session for external Claude instances
+  // Returns null if the session isn't linked to a managed session
+  // Pass event.cwd so we can create implicit sessions with the correct directory
   const session = getOrCreateSession(event.sessionId, event.cwd)
 
   state.eventHistory.push(event)

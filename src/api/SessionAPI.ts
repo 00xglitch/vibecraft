@@ -184,6 +184,27 @@ export function createSessionAPI(apiUrl: string) {
         console.error('Error refreshing sessions:', e)
       }
     },
+
+    /**
+     * Create an implicit session for external Claude instances.
+     * These sessions have no tmux control - they just track events.
+     */
+    async createImplicitSession(
+      claudeSessionId: string,
+      cwd?: string
+    ): Promise<CreateSessionResponse> {
+      try {
+        const response = await fetch(`${apiUrl}/sessions/implicit`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ claudeSessionId, cwd }),
+        })
+        return await response.json()
+      } catch (e) {
+        console.error('Error creating implicit session:', e)
+        return { ok: false, error: 'Network error' }
+      }
+    },
   }
 }
 

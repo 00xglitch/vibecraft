@@ -274,18 +274,23 @@
   color: #c4b5fd;
 }
 
-/* External session badge - for sessions not spawned by Vibecraft */
-.external-badge {
-  display: inline-block;
+/* Badge for external/implicit sessions */
+.session-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 4px;
   font-size: 9px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  padding: 1px 4px;
-  background: rgba(147, 197, 253, 0.15);
-  border: 1px solid rgba(147, 197, 253, 0.3);
   border-radius: 3px;
-  color: #93c5fd;
-  margin-left: 4px;
+  margin-left: 6px;
   vertical-align: middle;
+}
+
+.session-badge.external {
+  background: rgba(147, 197, 253, 0.2);
+  border: 1px solid rgba(147, 197, 253, 0.3);
+  color: #93c5fd;
 }
