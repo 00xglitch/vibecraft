@@ -29,8 +29,12 @@
 //!
 //! **Short timeout**: 2-second curl timeout (-m 2) ensures the child doesn't
 //! hang indefinitely if the server is unresponsive.
+//!
+//! **PATH bootstrapping**: curl may not be in PATH in minimal environments.
+//! We search common locations (Homebrew, system bins) to find it.
 
 use serde::Serialize;
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 /// Default WebSocket server endpoint for event notifications.
@@ -41,6 +45,50 @@ const DEFAULT_URL: &str = "http://localhost:4003/event";
 /// Short timeout (2s) ensures we don't block too long
 /// if the server is slow or unresponsive.
 const TIMEOUT_SECS: u64 = 2;
+
+/// Common tool locations for cross-platform discovery.
+///
+/// These paths cover:
+/// - macOS Apple Silicon Homebrew: /opt/homebrew/bin
+/// - macOS Intel Homebrew / Linux local: /usr/local/bin
+/// - System binaries: /usr/bin, /bin
+const KNOWN_PATHS: &[&str] = &[
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    "/usr/bin",
+    "/bin",
+];
+
+/// Find curl executable, checking PATH first, then common locations.
+///
+/// In minimal environments (some cron jobs, restricted shells), curl may not
+/// be in PATH even when installed. This function checks common locations.
+///
+/// # Returns
+///
+/// `Some(path)` if curl is found, `None` otherwise.
+fn find_curl() -> Option<String> {
+    // First, try `curl` directly (it's in PATH)
+    if Command::new("curl")
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok()
+    {
+        return Some("curl".to_string());
+    }
+
+    // Check known locations directly
+    for dir in KNOWN_PATHS {
+        let path = format!("{}/curl", dir);
+        if Path::new(&path).exists() {
+            return Some(path);
+        }
+    }
+
+    None
+}
 
 /// Sends an event to the WebSocket server asynchronously.
 ///
@@ -70,6 +118,12 @@ const TIMEOUT_SECS: u64 = 2;
 pub fn notify_server<T: Serialize>(event: T, url: Option<&str>) {
     let url = url.unwrap_or(DEFAULT_URL);
 
+    // Find curl executable (may not be in PATH in minimal environments)
+    let curl_path = match find_curl() {
+        Some(p) => p,
+        None => return, // Silently fail if curl not found (events are persisted to JSONL)
+    };
+
     let body = match serde_json::to_string(&event) {
         Ok(b) => b,
         Err(_) => return,
@@ -77,7 +131,7 @@ pub fn notify_server<T: Serialize>(event: T, url: Option<&str>) {
 
     // Spawn a detached child process using curl (same as bash's `curl ... &`)
     // The child process survives after main() exits, unlike threads.
-    let _ = Command::new("curl")
+    let _ = Command::new(&curl_path)
         .args([
             "-s",                          // Silent mode
             "-X", "POST",                  // HTTP POST

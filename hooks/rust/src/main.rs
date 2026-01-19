@@ -32,7 +32,7 @@
 //!
 //! This Rust implementation achieves ~3.5ms latency compared to ~35ms for the bash
 //! script, primarily due to:
-//! - Single binary (no process spawning for `jq` or `curl`)
+//! - Single binary (no jq dependency; curl spawned for optional HTTP notifications)
 //! - Zero-allocation JSON parsing with `serde_json`
 //! - No interpreter startup time
 //! - Static linking (minimal dynamic library overhead)

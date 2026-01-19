@@ -30,13 +30,18 @@
 //!     ▼
 //! VibecraftEvent (output)
 //! ```
+//!
+//! # Performance
+//!
+//! Transcript reading uses a seek-from-end strategy to avoid O(n) full-file
+//! reads on large transcripts. We read chunks from the end and expand as needed.
 
 use crate::event::{HookInput, VibecraftEvent};
 use chrono::Utc;
 use rand::Rng;
 use serde_json::{json, Value};
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 
 /// Generates a unique event identifier.
 ///
@@ -113,6 +118,82 @@ fn map_event_type(hook_event_name: &str) -> &'static str {
     }
 }
 
+/// Reads the last N lines from a file using seek-from-end strategy.
+///
+/// This avoids O(n) full-file reads on large transcripts by:
+/// 1. Seeking to the end minus a chunk size
+/// 2. Reading from there to EOF
+/// 3. Expanding chunk size if we don't have enough lines
+///
+/// # Arguments
+///
+/// * `path` - Path to the file to read
+/// * `n` - Number of lines to read from the end
+///
+/// # Returns
+///
+/// Up to the last N lines from the file. May return fewer if file is small.
+///
+/// # Performance
+///
+/// Initial chunk: 8KB (covers ~100-200 lines of typical JSONL)
+/// Doubles chunk size if more lines needed, up to file size.
+fn read_last_n_lines(path: &str, n: usize) -> Vec<String> {
+    let file = match File::open(path) {
+        Ok(f) => f,
+        Err(_) => return Vec::new(),
+    };
+
+    let file_size = match file.metadata() {
+        Ok(m) => m.len(),
+        Err(_) => return Vec::new(),
+    };
+
+    if file_size == 0 {
+        return Vec::new();
+    }
+
+    let mut reader = BufReader::new(file);
+    let mut chunk_size: u64 = 8192; // Start with 8KB
+    let mut lines = Vec::new();
+
+    loop {
+        let start_pos = file_size.saturating_sub(chunk_size);
+        if reader.seek(SeekFrom::Start(start_pos)).is_err() {
+            break;
+        }
+
+        // If we're not at file start, skip partial first line
+        if start_pos > 0 {
+            let mut partial = String::new();
+            let _ = reader.read_line(&mut partial);
+        }
+
+        // Read remaining lines
+        lines.clear();
+        for line in reader.by_ref().lines() {
+            if let Ok(l) = line {
+                lines.push(l);
+            }
+        }
+
+        // If we have enough lines or already read entire file, we're done
+        if lines.len() >= n || chunk_size >= file_size {
+            break;
+        }
+
+        // Double chunk size and try again
+        chunk_size = chunk_size.saturating_mul(2).min(file_size);
+    }
+
+    // Return only the last n lines
+    if lines.len() > n {
+        lines.split_off(lines.len() - n)
+    } else {
+        lines
+    }
+}
+
 /// Extracts assistant text from the transcript for pre_tool_use events.
 ///
 /// Reads the Claude session transcript file and extracts text content from
@@ -129,7 +210,7 @@ fn map_event_type(hook_event_name: &str) -> &'static str {
 ///
 /// # Implementation Notes
 ///
-/// - Reads the last 30 lines of the transcript for efficiency
+/// - Reads the last 30 lines of the transcript for efficiency (using seek-from-end)
 /// - Finds the most recent user message as a boundary
 /// - Collects text content from assistant messages after that boundary
 /// - Returns empty string on any error (file not found, parse error, etc.)
@@ -139,20 +220,8 @@ fn extract_assistant_text(transcript_path: &Option<String>) -> String {
         _ => return String::new(),
     };
 
-    let file = match File::open(path) {
-        Ok(f) => f,
-        Err(_) => return String::new(),
-    };
-
-    let reader = BufReader::new(file);
-    let lines: Vec<String> = reader
-        .lines()
-        .filter_map(|l| l.ok())
-        .collect();
-
-    // Get last 30 lines (like bash script)
-    let start = if lines.len() > 30 { lines.len() - 30 } else { 0 };
-    let recent_lines = &lines[start..];
+    // Use optimized seek-from-end reader instead of reading entire file
+    let recent_lines = read_last_n_lines(path, 30);
 
     // Find last user message index
     let mut last_user_idx: Option<usize> = None;
@@ -203,7 +272,7 @@ fn extract_assistant_text(transcript_path: &Option<String>) -> String {
 ///
 /// # Implementation Notes
 ///
-/// - Reads the last 200 lines of the transcript (stop events may have long contexts)
+/// - Reads the last 200 lines of the transcript (using seek-from-end for efficiency)
 /// - Finds the most recent assistant message with text content
 /// - Returns the last such message found (there may be multiple assistant turns)
 fn extract_assistant_response(transcript_path: &Option<String>) -> String {
@@ -212,25 +281,13 @@ fn extract_assistant_response(transcript_path: &Option<String>) -> String {
         _ => return String::new(),
     };
 
-    let file = match File::open(path) {
-        Ok(f) => f,
-        Err(_) => return String::new(),
-    };
-
-    let reader = BufReader::new(file);
-    let lines: Vec<String> = reader
-        .lines()
-        .filter_map(|l| l.ok())
-        .collect();
-
-    // Get last 200 lines
-    let start = if lines.len() > 200 { lines.len() - 200 } else { 0 };
-    let recent_lines = &lines[start..];
+    // Use optimized seek-from-end reader instead of reading entire file
+    let recent_lines = read_last_n_lines(path, 200);
 
     // Find last assistant message with text content
     let mut last_assistant_text: Option<String> = None;
 
-    for line in recent_lines {
+    for line in &recent_lines {
         if let Ok(obj) = serde_json::from_str::<Value>(line) {
             if obj.get("type").and_then(|t| t.as_str()) == Some("assistant") {
                 if let Some(content) = obj.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_array()) {

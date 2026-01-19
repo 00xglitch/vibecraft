@@ -23,8 +23,12 @@ npm install
 # Create data directory
 mkdir -p "$PLUGIN_DIR/data"
 
-# Make hook script executable
-chmod +x "$PLUGIN_DIR/hooks/vibecraft-hook.sh"
+# Make hook scripts/binaries executable
+chmod +x "$PLUGIN_DIR/hooks/vibecraft-hook.sh" 2>/dev/null || true
+# Also make any Rust binaries executable
+for binary in "$PLUGIN_DIR/hooks/bin/vibecraft-hook-"*; do
+  [ -f "$binary" ] && chmod +x "$binary"
+done
 
 # Check if Claude Code settings file exists
 CLAUDE_SETTINGS="$HOME/.claude/settings.json"
