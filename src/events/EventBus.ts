@@ -43,6 +43,8 @@ export interface EventContext {
   session: SessionContext | null
   /** Sound enabled flag */
   soundEnabled: boolean
+  /** Whether this event is from history replay (vs real-time) */
+  isHistory: boolean
 }
 
 /**

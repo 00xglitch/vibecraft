@@ -20,7 +20,9 @@ import { getStationForTool } from '../../../shared/types'
 export function registerNotificationHandlers(): void {
   // Tool completion notifications
   eventBus.on('post_tool_use', (event: PostToolUseEvent, ctx) => {
-    if (!event.success || !ctx.scene) return
+    // Skip ephemeral notifications during history replay - zones may not exist yet
+    // and old notifications don't make sense (they're 3-second transient feedback)
+    if (!event.success || !ctx.scene || ctx.isHistory) return
 
     const input = event.toolInput as Record<string, unknown>
     let notificationText: string | null = null
