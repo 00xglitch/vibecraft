@@ -2288,6 +2288,9 @@ function setupSettingsModal(): void {
   const portInput = document.getElementById('settings-port') as HTMLInputElement | null
   const portStatus = document.getElementById('settings-port-status')
 
+  // CLI command input
+  const cliCommandInput = document.getElementById('settings-cli-command') as HTMLInputElement | null
+
   // Load saved volume from localStorage
   const savedVolume = localStorage.getItem('vibecraft-volume')
   if (savedVolume !== null) {
@@ -2365,6 +2368,19 @@ function setupSettingsModal(): void {
       portStatus.textContent = connected ? '● Connected' : '○ Disconnected'
       portStatus.className = `port-status ${connected ? 'connected' : 'disconnected'}`
     }
+    // Fetch current CLI command from server
+    if (cliCommandInput) {
+      fetch(`${API_URL}/config`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.ok && data.cliCommand) {
+            cliCommandInput.value = data.cliCommand
+          }
+        })
+        .catch(() => {
+          // Keep default value on error
+        })
+    }
     modal.classList.add('visible')
   })
 
@@ -2421,6 +2437,27 @@ function setupSettingsModal(): void {
       if (confirm(`Port changed to ${newPort}. Reload page to connect to new port?`)) {
         window.location.reload()
       }
+    }
+  })
+
+  // CLI command change - save to server
+  cliCommandInput?.addEventListener('change', () => {
+    const newCommand = cliCommandInput.value.trim()
+    if (newCommand) {
+      fetch(`${API_URL}/config`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cliCommand: newCommand }),
+      })
+        .then(res => res.json())
+        .then(data => {
+          if (data.ok) {
+            console.log(`CLI command updated to: ${data.cliCommand}`)
+          }
+        })
+        .catch(err => {
+          console.error('Failed to update CLI command:', err)
+        })
     }
   })
 

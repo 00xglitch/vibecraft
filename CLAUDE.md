@@ -441,6 +441,7 @@ export const DEFAULTS = {
   SESSIONS_FILE: '~/.vibecraft/data/sessions.json',
   MAX_EVENTS: 1000,
   TMUX_SESSION: 'claude',
+  CLAUDE_COMMAND: 'claude',       // CLI command (or 'happy', etc.)
 }
 ```
 
@@ -456,6 +457,7 @@ This file is imported by:
 Vibecraft stores all data in `~/.vibecraft/data/`:
 - `events.jsonl` - Event log (append-only)
 - `sessions.json` - Session persistence
+- `config.json` - Server config (CLI command, etc.)
 - `tiles.json` - Text tile labels
 - `pending-prompt.txt` - Queued prompt (optional)
 
@@ -489,6 +491,7 @@ Environment variables override the defaults:
 | `VIBECRAFT_TMUX_SESSION` | claude | tmux session for prompt injection |
 | `VIBECRAFT_SESSIONS_FILE` | ~/.vibecraft/data/sessions.json | Session persistence file |
 | `VIBECRAFT_DATA_DIR` | ~/.vibecraft/data | Hook data directory |
+| `VIBECRAFT_CLAUDE_COMMAND` | claude | CLI command to spawn sessions (e.g., "happy") |
 | `DEEPGRAM_API_KEY` | (none) | Deepgram API key for voice input |
 
 A `.env` file is included with defaults - just run `npm run dev`.

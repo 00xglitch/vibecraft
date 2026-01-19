@@ -86,6 +86,8 @@ const MAX_EVENTS = parseInt(process.env.VIBECRAFT_MAX_EVENTS ?? String(DEFAULTS.
 const DEBUG = process.env.VIBECRAFT_DEBUG === 'true'
 const TMUX_SESSION = process.env.VIBECRAFT_TMUX_SESSION ?? DEFAULTS.TMUX_SESSION
 const SESSIONS_FILE = resolve(expandHome(process.env.VIBECRAFT_SESSIONS_FILE ?? DEFAULTS.SESSIONS_FILE))
+const CONFIG_FILE = resolve(expandHome(process.env.VIBECRAFT_CONFIG_FILE ?? '~/.vibecraft/data/config.json'))
+let claudeCommand = process.env.VIBECRAFT_CLAUDE_COMMAND ?? DEFAULTS.CLAUDE_COMMAND
 const TILES_FILE = resolve(expandHome(process.env.VIBECRAFT_TILES_FILE ?? '~/.vibecraft/data/tiles.json'))
 
 /** Time before a "working" session auto-transitions to idle (failsafe for missed events) */
@@ -795,7 +797,7 @@ function createSession(options: CreateSessionRequest = {}): Promise<ManagedSessi
       claudeArgs.push('--chrome')
     }
 
-    const claudeCmd = claudeArgs.length > 0 ? `claude ${claudeArgs.join(' ')}` : 'claude'
+    const claudeCmd = claudeArgs.length > 0 ? `${claudeCommand} ${claudeArgs.join(' ')}` : claudeCommand
 
     // Spawn tmux session with claude using execFile to prevent shell injection
     // Arguments are passed as array, not interpolated into a shell string
@@ -1061,6 +1063,42 @@ function loadSessions(): void {
     log(`Loaded ${managedSessions.size} sessions from ${SESSIONS_FILE}`)
   } catch (e) {
     console.error('Failed to load sessions:', e)
+  }
+}
+
+/**
+ * Save config to disk for persistence across restarts
+ */
+function saveConfig(): void {
+  try {
+    const data = { cliCommand: claudeCommand }
+    writeFileSync(CONFIG_FILE, JSON.stringify(data, null, 2))
+    debug(`Saved config to ${CONFIG_FILE}`)
+  } catch (e) {
+    console.error('Failed to save config:', e)
+  }
+}
+
+/**
+ * Load config from disk on startup
+ */
+function loadConfig(): void {
+  if (!existsSync(CONFIG_FILE)) {
+    debug('No saved config file found')
+    return
+  }
+
+  try {
+    const content = readFileSync(CONFIG_FILE, 'utf-8')
+    const data = JSON.parse(content)
+
+    // Only apply saved config if no env var override
+    if (!process.env.VIBECRAFT_CLAUDE_COMMAND && typeof data.cliCommand === 'string') {
+      claudeCommand = data.cliCommand
+      log(`Loaded CLI command from config: ${claudeCommand}`)
+    }
+  } catch (e) {
+    console.error('Failed to load config:', e)
   }
 }
 
@@ -1715,6 +1753,36 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
     return
   }
 
+  // Get server config
+  if (req.method === 'GET' && req.url === '/config') {
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ ok: true, cliCommand: claudeCommand }))
+    return
+  }
+
+  // Update server config
+  if (req.method === 'PATCH' && req.url === '/config') {
+    collectRequestBody(req).then(body => {
+      try {
+        const data = body ? JSON.parse(body) : {}
+        if (typeof data.cliCommand === 'string' && data.cliCommand.trim()) {
+          claudeCommand = data.cliCommand.trim()
+          log(`CLI command updated to: ${claudeCommand}`)
+          saveConfig()
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, cliCommand: claudeCommand }))
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: 'Invalid JSON' }))
+      }
+    }).catch(() => {
+      res.writeHead(413, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: false, error: 'Request body too large' }))
+    })
+    return
+  }
+
   // List all sessions
   if (req.method === 'GET' && req.url === '/sessions') {
     res.writeHead(200, { 'Content-Type': 'application/json' })
@@ -1958,7 +2026,7 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
           '-d',
           '-s', session.tmuxSession,
           '-c', cwd,
-          `PATH=${EXEC_PATH} claude -c --permission-mode=bypassPermissions --dangerously-skip-permissions`
+          `PATH=${EXEC_PATH} ${claudeCommand} -c --permission-mode=bypassPermissions --dangerously-skip-permissions`
         ], EXEC_OPTIONS, (error) => {
           if (error) {
             res.writeHead(500, { 'Content-Type': 'application/json' })
@@ -2219,6 +2287,9 @@ function main() {
 
   // Load saved sessions (for persistence across restarts)
   loadSessions()
+
+  // Load saved config (CLI command, etc.)
+  loadConfig()
 
   // Load saved text tiles
   loadTiles()

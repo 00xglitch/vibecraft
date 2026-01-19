@@ -351,6 +351,28 @@
   color: #f87171;
 }
 
+/* CLI Command input */
+.settings-command-row {
+  display: flex;
+  align-items: center;
+}
+
+#settings-cli-command {
+  width: 160px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: #fff;
+  font-family: monospace;
+  font-size: 14px;
+  outline: none;
+}
+
+#settings-cli-command:focus {
+  border-color: #a78bfa;
+}
+
 /* Settings sliders (volume, grid size, etc.) */
 .settings-slider-row {
   display: flex;

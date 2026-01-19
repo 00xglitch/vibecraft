@@ -31,6 +31,9 @@ export const DEFAULTS = {
 
   /** tmux session name */
   TMUX_SESSION: 'claude',
+
+  /** CLI command to run (e.g., 'claude' or 'happy') */
+  CLAUDE_COMMAND: 'claude',
 } as const
 
 export type Defaults = typeof DEFAULTS
