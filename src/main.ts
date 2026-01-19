@@ -2440,9 +2440,9 @@ function setupSettingsModal(): void {
     }
   })
 
-  // CLI command change - save to server
-  cliCommandInput?.addEventListener('change', () => {
-    const newCommand = cliCommandInput.value.trim()
+  // CLI command - save to server
+  const saveCliCommand = () => {
+    const newCommand = cliCommandInput?.value.trim()
     if (newCommand) {
       fetch(`${API_URL}/config`, {
         method: 'PATCH',
@@ -2452,12 +2452,22 @@ function setupSettingsModal(): void {
         .then(res => res.json())
         .then(data => {
           if (data.ok) {
-            console.log(`CLI command updated to: ${data.cliCommand}`)
+            toast.success(`CLI command set to "${data.cliCommand}"`, { duration: 2000 })
           }
         })
         .catch(err => {
           console.error('Failed to update CLI command:', err)
+          toast.error('Failed to save CLI command', { duration: 3000 })
         })
+    }
+  }
+
+  cliCommandInput?.addEventListener('change', saveCliCommand)
+  cliCommandInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      saveCliCommand()
+      cliCommandInput.blur()
     }
   })
 
