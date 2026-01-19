@@ -103,8 +103,12 @@ Bash script that captures Claude Code events. The source lives in `hooks/vibecra
 
 **Cross-platform support:**
 - Adds common tool paths to PATH (`/opt/homebrew/bin`, `/usr/local/bin`, etc.)
-- Uses `find_tool()` function to locate `jq` and `curl` defensively
+- Uses `find_tool()` function to locate `jq` (required) and `curl` (optional)
 - Handles macOS timestamp differences (no `date +%N`)
+
+**Dependencies:**
+- `jq` - **Required**. Used to parse and transform JSON events.
+- `curl` - **Optional**. Used for real-time server notifications. If missing, events are still written to JSONL (server watches file for changes via chokidar).
 
 **Known issue fixed**: Timestamp calculation used `$(date +%N)` which returns "087" etc. This was interpreted as octal. Fixed with `10#$ms_part` to force decimal.
 

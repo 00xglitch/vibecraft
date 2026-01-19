@@ -540,8 +540,8 @@ if (args[0] === 'doctor') {
     execSync('which curl', { stdio: 'ignore' })
     console.log('  ✓ curl')
   } catch {
-    console.log('  ✗ curl not found')
-    issues.push('curl not installed - hooks cannot send events to server')
+    console.log('  ⚠ curl not found (optional - events still logged to JSONL)')
+    warnings.push('curl not installed - real-time server notifications disabled, but events still logged to JSONL file')
   }
 
   // -------------------------------------------------------------------------

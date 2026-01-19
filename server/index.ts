@@ -2276,7 +2276,12 @@ function main() {
     }
     ws.send(JSON.stringify(tilesMsg))
 
-    // Send recent history - include all sessions (client creates implicit managed sessions for external Claude)
+    // Send recent history from ALL sessions, not just managed ones.
+    // This enables "external Claude" support: Claude instances started outside Vibecraft
+    // (in a regular terminal) will have their events included, allowing the client to
+    // create implicit managed sessions and 3D zones for them.
+    // Note: This may include events from unrelated/stale sessions, but the client handles
+    // deduplication and the benefit of supporting external Claude outweighs the extra data.
     const recentHistory = events.slice(-100)
     const historyMsg: ServerMessage = {
       type: 'history',
