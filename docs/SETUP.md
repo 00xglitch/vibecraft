@@ -94,11 +94,11 @@ npx vibecraft setup
 ```
 
 This:
-- Copies hook script to `~/.vibecraft/hooks/vibecraft-hook.sh`
+- Installs Rust hook binary to `~/.vibecraft/hooks/vibecraft-hook` (or bash script as fallback)
 - Creates `~/.vibecraft/data/` directory
 - Configures all 8 hooks in `~/.claude/settings.json`
 - Backs up existing settings
-- Checks for jq/tmux
+- Checks for curl (optional for real-time notifications) and tmux (optional for browser prompts)
 
 **After setup, restart Claude Code for hooks to take effect.**
 

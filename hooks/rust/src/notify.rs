@@ -59,35 +59,17 @@ const KNOWN_PATHS: &[&str] = &[
     "/bin",
 ];
 
-/// Find curl executable, checking PATH first, then common locations.
+/// Attempts to spawn curl with the given arguments.
 ///
-/// In minimal environments (some cron jobs, restricted shells), curl may not
-/// be in PATH even when installed. This function checks common locations.
-///
-/// # Returns
-///
-/// `Some(path)` if curl is found, `None` otherwise.
-fn find_curl() -> Option<String> {
-    // First, try `curl` directly (it's in PATH)
-    if Command::new("curl")
-        .arg("--version")
+/// Returns true if spawn succeeded, false otherwise.
+fn try_spawn_curl(curl_cmd: &str, args: &[&str]) -> bool {
+    Command::new(curl_cmd)
+        .args(args)
+        .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .status()
+        .spawn()
         .is_ok()
-    {
-        return Some("curl".to_string());
-    }
-
-    // Check known locations directly
-    for dir in KNOWN_PATHS {
-        let path = format!("{}/curl", dir);
-        if Path::new(&path).exists() {
-            return Some(path);
-        }
-    }
-
-    None
 }
 
 /// Sends an event to the WebSocket server asynchronously.
@@ -109,6 +91,11 @@ fn find_curl() -> Option<String> {
 /// - `Command::spawn()` creates child processes that survive parent exit
 /// - This matches bash hook's `curl ... &` behavior
 ///
+/// # Performance
+///
+/// Tries `curl` directly first (single spawn). Only searches known paths
+/// if that fails, avoiding the overhead of running `curl --version` every event.
+///
 /// # Example
 ///
 /// ```ignore
@@ -118,32 +105,35 @@ fn find_curl() -> Option<String> {
 pub fn notify_server<T: Serialize>(event: T, url: Option<&str>) {
     let url = url.unwrap_or(DEFAULT_URL);
 
-    // Find curl executable (may not be in PATH in minimal environments)
-    let curl_path = match find_curl() {
-        Some(p) => p,
-        None => return, // Silently fail if curl not found (events are persisted to JSONL)
-    };
-
     let body = match serde_json::to_string(&event) {
         Ok(b) => b,
         Err(_) => return,
     };
 
-    // Spawn a detached child process using curl (same as bash's `curl ... &`)
-    // The child process survives after main() exits, unlike threads.
-    let _ = Command::new(&curl_path)
-        .args([
-            "-s",                          // Silent mode
-            "-X", "POST",                  // HTTP POST
-            "-H", "Content-Type: application/json",
-            "-d", &body,                   // Request body
-            "-m", &TIMEOUT_SECS.to_string(), // Timeout in seconds
-            url,
-        ])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn();
+    let timeout_str = TIMEOUT_SECS.to_string();
+    let args: Vec<&str> = vec![
+        "-s",                          // Silent mode
+        "-X", "POST",                  // HTTP POST
+        "-H", "Content-Type: application/json",
+        "-d", &body,                   // Request body
+        "-m", &timeout_str,            // Timeout in seconds
+        url,
+    ];
+
+    // Try `curl` directly first (common case: curl is in PATH)
+    if try_spawn_curl("curl", &args) {
+        return;
+    }
+
+    // Fallback: search known paths (for minimal environments without PATH)
+    for dir in KNOWN_PATHS {
+        let curl_path = format!("{}/curl", dir);
+        if Path::new(&curl_path).exists() && try_spawn_curl(&curl_path, &args) {
+            return;
+        }
+    }
+
+    // Silently fail if curl not found (events are persisted to JSONL anyway)
 }
 
 /// Checks if WebSocket notifications are enabled.

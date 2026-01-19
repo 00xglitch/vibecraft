@@ -166,7 +166,7 @@ fn main() {
 
     // Notify WebSocket server (true fire-and-forget)
     // The event is already persisted to JSONL, so HTTP notification is best-effort.
-    // No sleep - spawned thread runs independently, may or may not complete before exit.
+    // No sleep - detached curl process runs independently, may or may not complete before exit.
     if notify::is_notify_enabled() {
         let url = notify::get_notify_url();
         notify::notify_server(event, Some(&url));
