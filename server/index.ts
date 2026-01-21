@@ -452,6 +452,9 @@ function loadDeepgramKey(): string | null {
 /** Map Claude Code session IDs to our managed session IDs */
 const claudeToManagedMap = new Map<string, string>()
 
+/** Reverse lookup: tmux session name -> managed session ID (avoids linear search in pollTokens) */
+const tmuxToManagedMap = new Map<string, string>()
+
 /** Counter for generating session names */
 let sessionCounter = 0
 
@@ -548,11 +551,15 @@ function pollTokens(tmuxSession: string): void {
 
       debug(`Tokens updated: ${tokens} (cumulative: ${session.cumulative})`)
 
+      // Find managed session ID for this tmux session (O(1) lookup via reverse map)
+      const managedSessionId = tmuxToManagedMap.get(tmuxSession)
+
       // Broadcast token update
       broadcast({
         type: 'tokens',
         payload: {
           session: tmuxSession,
+          sessionId: managedSessionId,
           current: tokens,
           cumulative: session.cumulative,
         },
@@ -995,6 +1002,7 @@ async function createSession(options: CreateSessionRequest = {}): Promise<Manage
       }
 
       managedSessions.set(id, session)
+      tmuxToManagedMap.set(tmuxSession, id)
       log(`Created session: ${name} (${id.slice(0, 8)}) -> tmux:${tmuxSession} project:${projectInfo?.name ?? 'unknown'} (${projectInfo?.source ?? 'none'})${worktreeInfo ? ` [worktree: ${worktreeInfo.branch}]` : ''}`)
 
       // Track git status for this session
@@ -1125,9 +1133,10 @@ async function deleteSession(id: string): Promise<boolean> {
         )
       }
 
+      // Clean up all session maps
+      tmuxToManagedMap.delete(session.tmuxSession)
       managedSessions.delete(id)
       gitStatusManager.untrack(id)
-      // Clean up mapping
       for (const [claudeId, managedId] of claudeToManagedMap) {
         if (managedId === id) {
           claudeToManagedMap.delete(claudeId)
@@ -1294,6 +1303,10 @@ function loadSessions(): void {
         session.status = 'offline'
         session.currentTool = undefined
         managedSessions.set(session.id, session)
+        // Populate reverse lookup map
+        if (session.tmuxSession) {
+          tmuxToManagedMap.set(session.tmuxSession, session.id)
+        }
         // Track git status if session has a cwd
         if (session.cwd) {
           gitStatusManager.track(session.id, session.cwd)
