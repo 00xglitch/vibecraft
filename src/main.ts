@@ -23,7 +23,8 @@ import {
   type PostToolUseEvent,
   type ManagedSession,
 } from '../shared/types'
-import { soundManager } from './audio'
+import { soundManager, SOUND_CATEGORIES, SOUND_LABELS } from './audio'
+import type { SoundName } from './audio'
 
 // Expose for console testing (can remove in production)
 ;(window as any).soundManager = soundManager
@@ -1796,7 +1797,7 @@ function updateStats() {
 // Event Handling
 // ============================================================================
 
-function handleEvent(event: ClaudeEvent) {
+function handleEvent(event: ClaudeEvent, isHistory = false) {
   // Get or create session for this event
   // Returns null if the session isn't linked to a managed session
   const session = getOrCreateSession(event.sessionId)
@@ -1810,6 +1811,7 @@ function handleEvent(event: ClaudeEvent) {
     feedManager: state.feedManager,
     timelineManager: state.timelineManager,
     soundEnabled: state.soundEnabled,
+    isHistory,
     session: session ? {
       id: event.sessionId,
       color: session.color,
@@ -1922,7 +1924,10 @@ function handleEvent(event: ClaudeEvent) {
 
       // Show thinking indicator AFTER feedManager.add() to ensure correct order
       // (prompt appears first, then thinking indicator)
-      state.feedManager?.showThinking(event.sessionId, session.color)
+      // Skip during history replay - ephemeral UI that doesn't need to be restored
+      if (!isHistory) {
+        state.feedManager?.showThinking(event.sessionId, session.color)
+      }
 
       // Update UI badge (zone attention cleared by zoneHandlers)
       updateAttentionBadge()
@@ -2383,6 +2388,118 @@ function setupSettingsModal(): void {
     if (characterSelect) characterSelect.value = savedCharacter
   }
 
+  // ============================================
+  // Sound Preferences Setup
+  // ============================================
+  const soundPrefsToggle = document.getElementById('sound-prefs-toggle')
+  const soundPrefsContainer = document.getElementById('sound-prefs-container')
+
+  // Load saved muted sounds from localStorage
+  const savedMutedSounds = localStorage.getItem('vibecraft-muted-sounds')
+  if (savedMutedSounds !== null) {
+    try {
+      const mutedSounds = JSON.parse(savedMutedSounds) as SoundName[]
+      soundManager.setMutedSounds(mutedSounds)
+    } catch {
+      // Invalid JSON, ignore
+    }
+  }
+
+  // Populate sound preferences UI
+  if (soundPrefsContainer) {
+    // Helper to update category checkbox state based on individual sounds
+    const updateCategoryCheckbox = (categoryCheckbox: HTMLInputElement, sounds: SoundName[]) => {
+      const mutedCount = sounds.filter(s => soundManager.isSoundMuted(s)).length
+      if (mutedCount === 0) {
+        categoryCheckbox.checked = true
+        categoryCheckbox.indeterminate = false
+      } else if (mutedCount === sounds.length) {
+        categoryCheckbox.checked = false
+        categoryCheckbox.indeterminate = false
+      } else {
+        categoryCheckbox.checked = false
+        categoryCheckbox.indeterminate = true
+      }
+    }
+
+    // Helper to save muted sounds to localStorage
+    const saveMutedSounds = () => {
+      const mutedSounds = soundManager.getMutedSounds()
+      localStorage.setItem('vibecraft-muted-sounds', JSON.stringify(mutedSounds))
+    }
+
+    for (const [categoryKey, category] of Object.entries(SOUND_CATEGORIES)) {
+      const categoryDiv = document.createElement('div')
+      categoryDiv.className = 'sound-prefs-category'
+
+      // Category header with toggle-all checkbox
+      const header = document.createElement('div')
+      header.className = 'sound-prefs-category-header'
+
+      const categoryCheckbox = document.createElement('input')
+      categoryCheckbox.type = 'checkbox'
+      categoryCheckbox.id = `sound-category-${categoryKey}`
+      updateCategoryCheckbox(categoryCheckbox, category.sounds)
+
+      const categoryLabel = document.createElement('label')
+      categoryLabel.className = 'sound-prefs-category-label'
+      categoryLabel.htmlFor = `sound-category-${categoryKey}`
+      categoryLabel.textContent = category.label
+
+      header.appendChild(categoryCheckbox)
+      header.appendChild(categoryLabel)
+      categoryDiv.appendChild(header)
+
+      // Category checkbox toggles all sounds in category
+      categoryCheckbox.addEventListener('change', () => {
+        const shouldMute = !categoryCheckbox.checked
+        for (const soundName of category.sounds) {
+          soundManager.setSoundMuted(soundName, shouldMute)
+          const soundCheckbox = document.getElementById(`sound-pref-${soundName}`) as HTMLInputElement | null
+          if (soundCheckbox) soundCheckbox.checked = !shouldMute
+        }
+        categoryCheckbox.indeterminate = false
+        saveMutedSounds()
+      })
+
+      const grid = document.createElement('div')
+      grid.className = 'sound-prefs-grid'
+
+      for (const soundName of category.sounds) {
+        const item = document.createElement('div')
+        item.className = 'sound-pref-item'
+
+        const checkbox = document.createElement('input')
+        checkbox.type = 'checkbox'
+        checkbox.id = `sound-pref-${soundName}`
+        checkbox.checked = !soundManager.isSoundMuted(soundName)
+
+        checkbox.addEventListener('change', () => {
+          soundManager.setSoundMuted(soundName, !checkbox.checked)
+          updateCategoryCheckbox(categoryCheckbox, category.sounds)
+          saveMutedSounds()
+        })
+
+        const label = document.createElement('label')
+        label.htmlFor = `sound-pref-${soundName}`
+        label.textContent = SOUND_LABELS[soundName] || soundName
+
+        item.appendChild(checkbox)
+        item.appendChild(label)
+        grid.appendChild(item)
+      }
+
+      categoryDiv.appendChild(grid)
+      soundPrefsContainer.appendChild(categoryDiv)
+    }
+  }
+
+  // Toggle sound preferences visibility
+  soundPrefsToggle?.addEventListener('click', () => {
+    const isExpanded = soundPrefsToggle.classList.toggle('expanded')
+    soundPrefsContainer?.classList.toggle('visible', isExpanded)
+  })
+
   // Apply streaming mode (hide/show username)
   function applyStreamingMode(enabled: boolean) {
     const usernameEl = document.getElementById('username')
@@ -2421,6 +2538,32 @@ function setupSettingsModal(): void {
     // Sync character select
     if (characterSelect) {
       characterSelect.value = localStorage.getItem('vibecraft-character') || 'robot'
+    }
+    // Sync sound preferences checkboxes (individual and category)
+    for (const [categoryKey, category] of Object.entries(SOUND_CATEGORIES)) {
+      let mutedCount = 0
+      for (const soundName of category.sounds) {
+        const checkbox = document.getElementById(`sound-pref-${soundName}`) as HTMLInputElement | null
+        if (checkbox) {
+          const isMuted = soundManager.isSoundMuted(soundName)
+          checkbox.checked = !isMuted
+          if (isMuted) mutedCount++
+        }
+      }
+      // Update category checkbox
+      const categoryCheckbox = document.getElementById(`sound-category-${categoryKey}`) as HTMLInputElement | null
+      if (categoryCheckbox) {
+        if (mutedCount === 0) {
+          categoryCheckbox.checked = true
+          categoryCheckbox.indeterminate = false
+        } else if (mutedCount === category.sounds.length) {
+          categoryCheckbox.checked = false
+          categoryCheckbox.indeterminate = false
+        } else {
+          categoryCheckbox.checked = false
+          categoryCheckbox.indeterminate = true
+        }
+      }
     }
     // Sync port input
     if (portInput) portInput.value = String(AGENT_PORT)
@@ -2814,8 +2957,9 @@ function init() {
       }
     }
     // Second pass: process all events (sessions created dynamically)
+    // Mark as history so ephemeral UI (notifications) is skipped
     for (const event of events) {
-      handleEvent(event)
+      handleEvent(event, true)
     }
   })
 

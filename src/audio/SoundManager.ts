@@ -155,10 +155,75 @@ interface SynthConfig {
   release: number
 }
 
+// Sound categories for UI organization
+export const SOUND_CATEGORIES: Record<string, { label: string; sounds: SoundName[] }> = {
+  tools: {
+    label: 'Tools',
+    sounds: ['read', 'write', 'edit', 'bash', 'grep', 'webfetch', 'task', 'todo', 'success', 'error'],
+  },
+  events: {
+    label: 'Session Events',
+    sounds: ['prompt', 'stop', 'thinking', 'spawn', 'despawn', 'notification'],
+  },
+  zones: {
+    label: 'Zones',
+    sounds: ['zone_create', 'zone_delete', 'focus'],
+  },
+  ui: {
+    label: 'UI',
+    sounds: ['click', 'modal_open', 'modal_confirm', 'modal_cancel', 'walking', 'hover'],
+  },
+  voice: {
+    label: 'Voice',
+    sounds: ['voice_start', 'voice_stop'],
+  },
+  special: {
+    label: 'Special',
+    sounds: ['git_commit', 'intro', 'clear'],
+  },
+}
+
+// Human-readable labels for sounds
+export const SOUND_LABELS: Record<SoundName, string> = {
+  read: 'Read File',
+  write: 'Write File',
+  edit: 'Edit File',
+  bash: 'Bash Command',
+  grep: 'Search (Grep)',
+  glob: 'Search (Glob)',
+  webfetch: 'Web Fetch',
+  websearch: 'Web Search',
+  task: 'Task/Agent',
+  todo: 'Todo Update',
+  git_commit: 'Git Commit',
+  clear: 'Clear',
+  success: 'Success',
+  error: 'Error',
+  walking: 'Walking',
+  focus: 'Zone Focus',
+  click: 'Click',
+  modal_open: 'Modal Open',
+  modal_cancel: 'Modal Cancel',
+  modal_confirm: 'Modal Confirm',
+  hover: 'Hover',
+  spawn: 'Agent Spawn',
+  despawn: 'Agent Despawn',
+  zone_create: 'Zone Create',
+  zone_delete: 'Zone Delete',
+  prompt: 'Prompt Submit',
+  stop: 'Session Stop',
+  notification: 'Notification',
+  thinking: 'Thinking',
+  voice_start: 'Voice Start',
+  voice_stop: 'Voice Stop',
+  intro: 'Startup',
+}
+
 class SoundManager {
   private initialized = false
   private enabled = true
   private volume = 0.7 // 0-1 (maps to master gain)
+  private mutedSounds: Set<SoundName> = new Set()
 
   // Synth pools by oscillator type (reduces GC)
   private synthPools: Map<OscType, Tone.Synth[]> = new Map([
@@ -232,6 +297,56 @@ class SoundManager {
   }
 
   // ============================================
+  // Per-Sound Muting
+  // ============================================
+
+  /**
+   * Mute a specific sound
+   */
+  muteSound(name: SoundName): void {
+    this.mutedSounds.add(name)
+  }
+
+  /**
+   * Unmute a specific sound
+   */
+  unmuteSound(name: SoundName): void {
+    this.mutedSounds.delete(name)
+  }
+
+  /**
+   * Set whether a specific sound is muted
+   */
+  setSoundMuted(name: SoundName, muted: boolean): void {
+    if (muted) {
+      this.mutedSounds.add(name)
+    } else {
+      this.mutedSounds.delete(name)
+    }
+  }
+
+  /**
+   * Check if a specific sound is muted
+   */
+  isSoundMuted(name: SoundName): boolean {
+    return this.mutedSounds.has(name)
+  }
+
+  /**
+   * Get all muted sounds
+   */
+  getMutedSounds(): SoundName[] {
+    return Array.from(this.mutedSounds)
+  }
+
+  /**
+   * Set all muted sounds at once (replaces current muted set)
+   */
+  setMutedSounds(sounds: SoundName[]): void {
+    this.mutedSounds = new Set(sounds)
+  }
+
+  // ============================================
   // Spatial Audio Configuration
   // ============================================
 
@@ -281,6 +396,9 @@ class SoundManager {
    */
   play(name: SoundName, options?: SoundPlayOptions): void {
     if (!this.initialized || !this.enabled) return
+
+    // Check if this specific sound is muted
+    if (this.mutedSounds.has(name)) return
 
     const soundFn = this.sounds[name]
     if (!soundFn) {

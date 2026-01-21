@@ -3,6 +3,7 @@
  *
  * Shows floating notifications above zones when tools complete.
  * Uses ZoneNotifications system for tool-specific styling.
+ * Also handles Claude Code notification events (permission prompts, etc).
  */
 
 import { eventBus } from '../EventBus'
@@ -11,8 +12,27 @@ import {
   formatCommandResult,
   formatSearchResult,
 } from '../../scene/ZoneNotifications'
-import type { PostToolUseEvent } from '../../../shared/types'
+import { showToast, type ToastType } from '../../ui/Toast'
+import type { PostToolUseEvent, NotificationEvent } from '../../../shared/types'
 import { getStationForTool } from '../../../shared/types'
+
+/**
+ * Map notification types to toast styling
+ */
+function getNotificationStyle(notificationType: string): { type: ToastType; icon: string } {
+  switch (notificationType) {
+    case 'permission_prompt':
+      return { type: 'warning', icon: '🔐' }
+    case 'idle_prompt':
+      return { type: 'info', icon: '💤' }
+    case 'auth_success':
+      return { type: 'success', icon: '✅' }
+    case 'elicitation_dialog':
+      return { type: 'info', icon: '💬' }
+    default:
+      return { type: 'info', icon: '🔔' }
+  }
+}
 
 /**
  * Register notification-related event handlers
@@ -20,7 +40,10 @@ import { getStationForTool } from '../../../shared/types'
 export function registerNotificationHandlers(): void {
   // Tool completion notifications
   eventBus.on('post_tool_use', (event: PostToolUseEvent, ctx) => {
-    if (!event.success || !ctx.scene) return
+    // Skip ephemeral notifications during history replay - zones may not exist yet
+    // and old notifications don't make sense (they're 3-second transient feedback)
+    // Also need a linked session to show zone notifications
+    if (!event.success || !ctx.scene || ctx.isHistory || !ctx.session) return
 
     const input = event.toolInput as Record<string, unknown>
     let notificationText: string | null = null
@@ -125,6 +148,33 @@ export function registerNotificationHandlers(): void {
           success: event.success,
         })
       }
+    }
+  })
+
+  // Claude Code notification events (permission prompts, idle prompts, etc.)
+  eventBus.on('notification', (event, ctx) => {
+    // Skip during history replay
+    if (ctx.isHistory) return
+
+    const notifEvent = event as unknown as NotificationEvent
+    const { message, notificationType } = notifEvent
+    const style = getNotificationStyle(notificationType)
+
+    // Show toast notification for global visibility
+    showToast(message, {
+      type: style.type,
+      icon: style.icon,
+      duration: 5000, // Longer duration for system notifications
+    })
+
+    // Also show zone notification if we have a linked session
+    if (ctx.scene && ctx.session) {
+      ctx.scene.zoneNotifications.show(ctx.session.id, {
+        text: message.slice(0, 40),
+        icon: style.icon,
+        style: style.type === 'warning' ? 'warning' : style.type === 'error' ? 'error' : 'info',
+        duration: 4,
+      })
     }
   })
 }
