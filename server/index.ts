@@ -26,7 +26,6 @@ import type {
   PreToolUseEvent,
   PostToolUseEvent,
   ManagedSession,
-  ClaudeSession,
   CreateSessionRequest,
   CreateImplicitSessionRequest,
   UpdateSessionRequest,
@@ -1019,7 +1018,7 @@ async function createSession(options: CreateSessionRequest = {}): Promise<Manage
         return
       }
 
-      const session: ClaudeSession = {
+      const session: ManagedSession = {
         id,
         name,
         sessionType: 'claude',
@@ -1166,7 +1165,9 @@ async function deleteSession(id: string): Promise<boolean> {
       }
 
       // Clean up all session maps
-      tmuxToManagedMap.delete(session.tmuxSession)
+      if (session.tmuxSession) {
+        tmuxToManagedMap.delete(session.tmuxSession)
+      }
       managedSessions.delete(id)
       gitStatusManager.untrack(id)
       for (const [claudeId, managedId] of claudeToManagedMap) {
@@ -2417,16 +2418,18 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
       }
 
       // Kill existing tmux session if it exists (ignore errors)
-      execFile('tmux', ['kill-session', '-t', session.tmuxSession], EXEC_OPTIONS, () => {
+      // Capture tmuxSession as const since it's already validated above
+      const tmuxSession = session.tmuxSession
+      execFile('tmux', ['kill-session', '-t', tmuxSession], EXEC_OPTIONS, () => {
         // Respawn tmux session with claude using execFile
         // NOTE: Must wrap in bash -c to ensure PATH is properly exported.
         execFile('tmux', [
           'new-session',
           '-d',
-          '-s', session.tmuxSession,
+          '-s', tmuxSession,
           '-c', cwd,
           `bash -c 'export PATH="${EXEC_PATH}"; ${claudeCommand} -c --permission-mode=bypassPermissions --dangerously-skip-permissions'`
-        ], EXEC_OPTIONS, (error) => {
+        ], EXEC_OPTIONS, (error: Error | null) => {
           if (error) {
             res.writeHead(500, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ ok: false, error: `Failed to restart: ${error.message}` }))

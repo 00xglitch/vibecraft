@@ -18,6 +18,7 @@ export interface SessionFlags {
   continue?: boolean
   skipPermissions?: boolean
   chrome?: boolean
+  worktree?: boolean
 }
 
 export interface NewSessionModal {

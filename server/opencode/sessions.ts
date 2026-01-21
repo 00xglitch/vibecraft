@@ -270,7 +270,7 @@ export async function restartOpenCodeSession(
     }
 
     dependencies.opencodeSessions.set(id, {
-      serverId: session.opencodeServerUrl,
+      serverId: session.opencodeServerUrl!,
       client,
       abortController,
       opencodeSessionId
@@ -278,7 +278,7 @@ export async function restartOpenCodeSession(
 
     session.opencodeSessionId = opencodeSessionId
 
-    await subscribeToOpenCodeEvents(id, session.opencodeServerUrl, opencodeSessionId, {
+    await subscribeToOpenCodeEvents(id, session.opencodeServerUrl!, opencodeSessionId, {
       opencodeSessions: dependencies.opencodeSessions,
       addEvent: () => {},
       debug: () => {}

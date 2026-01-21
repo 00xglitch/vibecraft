@@ -5,7 +5,7 @@
  * For OpenCode sessions, also includes provider/model configuration.
  */
 
-import type { ManagedSession, GitStatus, OpenCodeSession } from '../../shared/types'
+import type { ManagedSession, GitStatus } from '../../shared/types'
 import { soundManager } from '../audio'
 import { formatTimeAgo } from './FeedManager'
 import {
@@ -98,8 +98,8 @@ export function showZoneInfoModal(data: ZoneInfoData): void {
   // Fetch providers for OpenCode sessions
   if (data.managedSession.sessionType === 'opencode') {
     currentSessionId = data.managedSession.id
-    currentProviderId = (data.managedSession as OpenCodeSession).providerID ?? null
-    currentModelId = (data.managedSession as OpenCodeSession).modelID ?? null
+    currentProviderId = data.managedSession.providerID ?? null
+    currentModelId = data.managedSession.modelID ?? null
     fetchProviders()
   }
 }
@@ -248,7 +248,7 @@ async function handleModelLoad(providerId: string): Promise<void> {
   }
 }
 
-function setupProviderModelDropdowns(session: OpenCodeSession): void {
+function setupProviderModelDropdowns(session: ManagedSession): void {
   providerSelect?.destroy()
   modelSelect?.destroy()
   providerSelect = null
@@ -324,7 +324,6 @@ function renderContent(data: ZoneInfoData): void {
   const { managedSession: s, stats } = data
   const filesTouched = stats?.filesTouched ? Array.from(stats.filesTouched) : []
   const isOpenCode = s.sessionType === 'opencode'
-  const opencodeSession = s as OpenCodeSession
 
   content.innerHTML = `
     <!-- Header -->
@@ -416,11 +415,11 @@ function renderContent(data: ZoneInfoData): void {
 
       <div class="zone-info-config-row">
         <span class="zone-info-label">Current Provider</span>
-        <span class="zone-info-value" id="zone-info-current-provider">${opencodeSession.providerID ?? 'Default'}</span>
+        <span class="zone-info-value" id="zone-info-current-provider">${s.providerID ?? 'Default'}</span>
       </div>
       <div class="zone-info-config-row">
         <span class="zone-info-label">Current Model</span>
-        <span class="zone-info-value" id="zone-info-current-model">${opencodeSession.modelID ?? 'Default'}</span>
+        <span class="zone-info-value" id="zone-info-current-model">${s.modelID ?? 'Default'}</span>
       </div>
 
       <div class="zone-info-config-field">
@@ -491,7 +490,7 @@ function renderContent(data: ZoneInfoData): void {
 
   // Initialize provider/model dropdowns for OpenCode sessions
   if (isOpenCode) {
-    setupProviderModelDropdowns(opencodeSession)
+    setupProviderModelDropdowns(s)
   }
 }
 

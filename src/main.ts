@@ -651,7 +651,7 @@ function setupManagedSessions(): void {
   const opencodeOptions = document.getElementById('opencode-options')
   const opencodeModelField = document.getElementById('opencode-model-field')
 
-  let opencodeState = setupNewSessionModal(modal, {
+  let opencodeState = setupNewSessionModal(modal!, {
     onClaudeSession: (name, cwd, flags) => {
       createManagedSession(name, cwd, flags, currentModalHint ?? undefined, `pending-${Date.now()}`)
       closeModal()
@@ -740,7 +740,8 @@ function setupManagedSessions(): void {
 
     if (opencodeState.sessionType === 'opencode') {
       // Validate OpenCode session requires provider selection
-      const providerId = opencodeState.providerSelect?.getValue()
+      const modalState = opencodeState.getState()
+      const providerId = modalState.providerSelect?.getValue()
       if (!providerId) {
         alert('Please select a provider for OpenCode session')
         return
@@ -771,8 +772,9 @@ function setupManagedSessions(): void {
 
   // Create OpenCode session directly
   const createOpenCodeSession = async (name: string | undefined, cwd: string | undefined, hintPosition: { x: number; z: number } | null): Promise<void> => {
-    const providerId = opencodeState.providerSelect?.getValue() ?? null
-    const modelId = opencodeState.modelSelect?.getValue() ?? null
+    const modalState = opencodeState.getState()
+    const providerId = modalState.providerSelect?.getValue() ?? null
+    const modelId = modalState.modelSelect?.getValue() ?? null
 
     try {
       const response = await fetch('/sessions/opencode', {
@@ -1439,7 +1441,7 @@ function setupDevPanel(): void {
     const hasWorkingBehaviors = 'getWorkingBehaviorStations' in claude
 
     if (hasWorkingBehaviors) {
-      const stations = claude.getWorkingBehaviorStations()
+      const stations = (claude as unknown as { getWorkingBehaviorStations: () => string[] }).getWorkingBehaviorStations()
       for (const station of stations) {
         const btn = document.createElement('button')
         btn.className = 'dev-anim-btn dev-anim-btn-working'
@@ -1447,7 +1449,7 @@ function setupDevPanel(): void {
         btn.addEventListener('click', () => {
           const target = getTargetClaude()
           if (target && 'playWorkingBehavior' in target) {
-            target.playWorkingBehavior(station)
+            ;(target as { playWorkingBehavior: (station: string) => void }).playWorkingBehavior(station)
             document.querySelectorAll('.dev-anim-btn').forEach(b => b.classList.remove('playing'))
             btn.classList.add('playing')
             // Working behaviors loop, so keep playing indicator longer
@@ -1504,7 +1506,7 @@ function getOrCreateSession(sessionId: string, eventCwd?: string): SessionState 
   }
 
   // Try to link to an existing managed session first
-  let linkedManagedSession = tryLinkToManagedSession(sessionId)
+  let linkedManagedSession = tryLinkToSession(sessionId)
 
   // If no existing managed session, check if server needs to create an implicit one
   if (!linkedManagedSession) {
@@ -1676,14 +1678,16 @@ async function enterReplayMode(): Promise<void> {
 
     // Initialize replay scene manager if not already done
     if (!state.replaySceneManager) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       state.replaySceneManager = new ReplaySceneManager(
         state.scene,
-        (sessionId: string) => state.sessions.get(sessionId),
-        (sessionId: string, cwd: string) => {
+        // Type assertion: ICharacter is compatible with Claude for replay purposes
+        ((sessionId: string) => state.sessions.get(sessionId)) as any,
+        ((sessionId: string, cwd: string) => {
           const result = getOrCreateSession(sessionId, cwd)
           if (!result) throw new Error('Failed to create session')
           return result
-        }
+        }) as any
       )
       state.replaySceneManager.setManagers(state.timelineManager, state.feedManager)
     }
@@ -3352,10 +3356,9 @@ function init() {
            }
 
           // Create character entity for this zone
-          const isOpenCode = session.sessionType === 'opencode'
+          // Note: This block is inside sessionType === 'claude', so character uses zone color
           const claude = createCharacter(state.scene, {
-            color: isOpenCode ? 0x6366f1 : zone.color,
-            statusColor: isOpenCode ? 0x8b5cf6 : undefined,
+            color: zone.color,
             startStation: 'center',
           })
           const centerStation = zone.stations.get('center')
