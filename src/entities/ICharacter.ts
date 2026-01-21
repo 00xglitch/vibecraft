@@ -47,7 +47,7 @@ export interface ICharacter {
  * Available character models
  * Add new models here as they're created
  */
-export type CharacterModel = 'claude' | 'claudemon'
+export type CharacterModel = 'claude' | 'claudemon' | 'flower'
 
 /**
  * Default character model to use

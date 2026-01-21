@@ -466,6 +466,41 @@
   margin-left: auto;
 }
 
+/* Settings select rows */
+.settings-select-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  padding: 6px 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 6px;
+}
+
+.settings-select {
+  padding: 6px 12px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 13px;
+  cursor: pointer;
+  outline: none;
+}
+
+.settings-select:hover {
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.settings-select:focus {
+  border-color: #22d3ee;
+}
+
+.settings-select option {
+  background: #1a1a2e;
+  color: rgba(255, 255, 255, 0.9);
+}
+
 /* Keybind Settings */
 .keybind-settings {
   display: flex;
