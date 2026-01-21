@@ -38,6 +38,7 @@ import type {
 import { DEFAULTS } from '../shared/defaults.js'
 import { GitStatusManager } from './GitStatusManager.js'
 import { ProjectsManager } from './ProjectsManager.js'
+import { detectProjectName } from './projectDetector.js'
 import { fileURLToPath } from 'url'
 
 // ============================================================================
@@ -892,7 +893,6 @@ function shortId(): string {
 async function createSession(options: CreateSessionRequest = {}): Promise<ManagedSession> {
   const id = randomUUID()
   sessionCounter++
-  const name = options.name || `Claude ${sessionCounter}`
   const tmuxSession = `vibecraft-${shortId()}`
 
   // Validate cwd to prevent command injection
@@ -905,6 +905,19 @@ async function createSession(options: CreateSessionRequest = {}): Promise<Manage
 
   // Store original cwd for reference
   const originalCwd = cwd
+
+  // Detect project name from cwd (for auto-naming and display)
+  let projectInfo: Awaited<ReturnType<typeof detectProjectName>> | null = null
+  try {
+    projectInfo = await detectProjectName(cwd)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    log(`Error detecting project name for cwd "${cwd}": ${message}`)
+    // Continue with null projectInfo rather than failing session creation
+  }
+
+  // Use user-provided name, or detected project name, or fallback to counter
+  const name = options.name || projectInfo?.name || `Claude ${sessionCounter}`
 
   // Handle worktree creation if requested
   const flags = options.flags || {}
@@ -977,10 +990,12 @@ async function createSession(options: CreateSessionRequest = {}): Promise<Manage
         lastActivity: Date.now(),
         cwd,
         worktree: worktreeInfo,
+        projectName: projectInfo?.name,
+        projectSource: projectInfo?.source,
       }
 
       managedSessions.set(id, session)
-      log(`Created session: ${name} (${id.slice(0, 8)}) -> tmux:${tmuxSession} cmd:'${claudeCmd}'${worktreeInfo ? ` [worktree: ${worktreeInfo.branch}]` : ''}`)
+      log(`Created session: ${name} (${id.slice(0, 8)}) -> tmux:${tmuxSession} project:${projectInfo?.name ?? 'unknown'} (${projectInfo?.source ?? 'none'})${worktreeInfo ? ` [worktree: ${worktreeInfo.branch}]` : ''}`)
 
       // Track git status for this session
       if (cwd) {
