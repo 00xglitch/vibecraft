@@ -2493,18 +2493,11 @@ function main() {
     }
     ws.send(JSON.stringify(tilesMsg))
 
-    // Send recent history - filtered to only include events from current managed sessions
-    const activeClaudeSessionIds = new Set(
-      Array.from(managedSessions.values())
-        .map(s => s.claudeSessionId)
-        .filter(Boolean)
-    )
-    const filteredHistory = events
-      .filter(e => activeClaudeSessionIds.has(e.sessionId))
-      .slice(-50)
+    // Send recent history - include all sessions (client creates implicit managed sessions for external Claude)
+    const recentHistory = events.slice(-100)
     const historyMsg: ServerMessage = {
       type: 'history',
-      payload: filteredHistory,
+      payload: recentHistory,
     }
     ws.send(JSON.stringify(historyMsg))
 
