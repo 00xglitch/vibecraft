@@ -27,6 +27,7 @@ import type {
   PostToolUseEvent,
   ManagedSession,
   CreateSessionRequest,
+  CreateImplicitSessionRequest,
   UpdateSessionRequest,
   SessionPromptRequest,
   GitStatus,
@@ -177,12 +178,24 @@ function validateDirectoryPath(inputPath: string): string {
 /**
  * Validate a tmux session name.
  * tmux session names should only contain alphanumeric, underscore, hyphen.
+ * Special case: implicit sessions use "implicit-<shortId>" pattern.
  */
 function validateTmuxSession(name: string): string {
+  // Allow implicit session placeholder pattern
+  if (/^implicit-[a-f0-9-]+$/.test(name)) {
+    return name
+  }
   if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
     throw new Error(`Invalid tmux session name: ${name}`)
   }
   return name
+}
+
+/**
+ * Check if a session is implicit (external Claude, no tmux control)
+ */
+function isImplicitSession(session: ManagedSession): boolean {
+  return session.implicit === true
 }
 
 /**
@@ -559,6 +572,8 @@ function startTokenPolling(): void {
   // Poll every 2 seconds - poll all managed sessions
   setInterval(() => {
     for (const session of managedSessions.values()) {
+      // Skip implicit sessions - they don't have tmux to poll
+      if (isImplicitSession(session)) continue
       if (session.status !== 'offline') {
         pollTokens(session.tmuxSession)
       }
@@ -804,6 +819,8 @@ function startPermissionPolling(): void {
   // Poll every 1 second (more frequent than tokens since permissions are time-sensitive)
   setInterval(() => {
     for (const session of managedSessions.values()) {
+      // Skip implicit sessions - they don't have tmux to poll
+      if (isImplicitSession(session)) continue
       if (session.status !== 'offline') {
         pollPermissions(session.id, session.tmuxSession)
       }
@@ -982,6 +999,59 @@ async function createSession(options: CreateSessionRequest = {}): Promise<Manage
 }
 
 /**
+ * Create an implicit managed session for external Claude instances.
+ * These sessions have no tmux control - they just track events from external Claude.
+ */
+function createImplicitSession(options: CreateImplicitSessionRequest): ManagedSession {
+  const { claudeSessionId, cwd } = options
+
+  // Check if already exists
+  const existing = findManagedSession(claudeSessionId)
+  if (existing) {
+    log(`Implicit session already exists for Claude ${claudeSessionId.slice(0, 8)}`)
+    return existing
+  }
+
+  const id = randomUUID()
+  sessionCounter++
+
+  // Generate name from cwd or use generic "External Claude N"
+  const dirName = cwd ? cwd.split('/').pop() || cwd : null
+  const name = dirName ? `${dirName} (ext)` : `External ${sessionCounter}`
+
+  // Use placeholder tmux session name (won't be used for actual tmux operations)
+  const tmuxSession = `implicit-${claudeSessionId.slice(0, 8)}`
+
+  const session: ManagedSession = {
+    id,
+    name,
+    tmuxSession,
+    status: 'working', // External sessions are actively working when we first see them
+    claudeSessionId,
+    createdAt: Date.now(),
+    lastActivity: Date.now(),
+    cwd,
+    implicit: true, // Mark as implicit - no tmux control
+  }
+
+  managedSessions.set(id, session)
+  claudeToManagedMap.set(claudeSessionId, id)
+
+  log(`Created implicit session: ${name} (${id.slice(0, 8)}) for Claude ${claudeSessionId.slice(0, 8)}`)
+
+  // Track git status if cwd is provided
+  if (cwd) {
+    gitStatusManager.track(id, cwd)
+  }
+
+  // Broadcast and persist
+  broadcastSessions()
+  saveSessions()
+
+  return session
+}
+
+/**
  * Get all managed sessions
  */
 function getSessions(): ManagedSession[] {
@@ -1027,20 +1097,9 @@ async function deleteSession(id: string): Promise<boolean> {
     return false
   }
 
-  // Kill the tmux session using execFile to prevent shell injection
-  try {
-    validateTmuxSession(session.tmuxSession)
-  } catch {
-    log(`Invalid tmux session name: ${session.tmuxSession}`)
-    return false
-  }
-
   return new Promise((resolve) => {
-    execFile('tmux', ['kill-session', '-t', session.tmuxSession], EXEC_OPTIONS, async (error) => {
-      if (error) {
-        log(`Warning: Failed to kill tmux session: ${error.message}`)
-      }
-
+    // Helper to clean up and resolve
+    const cleanup = async () => {
       // Clean up worktree if this session used one
       if (session.worktree) {
         log(`Cleaning up worktree for session ${session.name}...`)
@@ -1064,6 +1123,28 @@ async function deleteSession(id: string): Promise<boolean> {
       broadcastSessions()
       saveSessions()
       resolve(true)
+    }
+
+    // Skip tmux kill for implicit sessions (no tmux to kill)
+    if (isImplicitSession(session)) {
+      cleanup()
+      return
+    }
+
+    // Kill the tmux session using execFile to prevent shell injection
+    try {
+      validateTmuxSession(session.tmuxSession)
+    } catch {
+      log(`Invalid tmux session name: ${session.tmuxSession}`)
+      resolve(false)
+      return
+    }
+
+    execFile('tmux', ['kill-session', '-t', session.tmuxSession], EXEC_OPTIONS, (error) => {
+      if (error) {
+        log(`Warning: Failed to kill tmux session: ${error.message}`)
+      }
+      cleanup()
     })
   })
 }
@@ -1075,6 +1156,11 @@ async function sendPromptToSession(id: string, prompt: string): Promise<{ ok: bo
   const session = managedSessions.get(id)
   if (!session) {
     return { ok: false, error: 'Session not found' }
+  }
+
+  // Implicit sessions don't have tmux control
+  if (isImplicitSession(session)) {
+    return { ok: false, error: 'Cannot send prompts to external sessions (no tmux control)' }
   }
 
   try {
@@ -1095,8 +1181,11 @@ async function sendPromptToSession(id: string, prompt: string): Promise<{ ok: bo
 function checkSessionHealth(): void {
   exec('tmux list-sessions -F "#{session_name}"', EXEC_OPTIONS, (error, stdout) => {
     if (error) {
-      // tmux might not be running
+      // tmux might not be running - mark non-implicit sessions as offline
       for (const session of managedSessions.values()) {
+        // Skip implicit sessions - they don't have tmux, so can't be "offline" in that sense
+        if (isImplicitSession(session)) continue
+
         if (session.status !== 'offline') {
           session.status = 'offline'
         }
@@ -1108,6 +1197,9 @@ function checkSessionHealth(): void {
     let changed = false
 
     for (const session of managedSessions.values()) {
+      // Skip implicit sessions - they don't have tmux to check
+      if (isImplicitSession(session)) continue
+
       const isAlive = activeSessions.has(session.tmuxSession)
       const newStatus = isAlive ? (session.status === 'offline' ? 'idle' : session.status) : 'offline'
 
@@ -1946,6 +2038,35 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
     return
   }
 
+  // Create an implicit session (external Claude, no tmux control)
+  if (req.method === 'POST' && req.url === '/sessions/implicit') {
+    collectRequestBody(req).then(body => {
+      try {
+        if (!body) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: 'Request body required' }))
+          return
+        }
+        const options = JSON.parse(body) as CreateImplicitSessionRequest
+        if (!options.claudeSessionId) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: 'claudeSessionId is required' }))
+          return
+        }
+        const session = createImplicitSession(options)
+        res.writeHead(201, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, session }))
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: (e as Error).message }))
+      }
+    }).catch(() => {
+      res.writeHead(413, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Request body too large' }))
+    })
+    return
+  }
+
   // Create a new session
   if (req.method === 'POST' && req.url === '/sessions') {
     collectRequestBody(req).then(async body => {
@@ -2493,7 +2614,12 @@ function main() {
     }
     ws.send(JSON.stringify(tilesMsg))
 
-    // Send recent history - include all sessions (client creates implicit managed sessions for external Claude)
+    // Send recent history from ALL sessions, not just managed ones.
+    // This enables "external Claude" support: Claude instances started outside Vibecraft
+    // (in a regular terminal) will have their events included, allowing the client to
+    // create implicit managed sessions and 3D zones for them.
+    // Note: This may include events from unrelated/stale sessions, but the client handles
+    // deduplication and the benefit of supporting external Claude outweighs the extra data.
     const recentHistory = events.slice(-100)
     const historyMsg: ServerMessage = {
       type: 'history',

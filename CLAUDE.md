@@ -114,10 +114,14 @@ Vibecraft uses hooks to capture Claude Code events. **The Rust hook is preferred
 
 **Bash hook cross-platform support:**
 - Adds common tool paths to PATH (`/opt/homebrew/bin`, `/usr/local/bin`, etc.)
-- Uses `find_tool()` function to locate `jq` and `curl` defensively
+- Uses `find_tool()` function to locate `jq` (required) and `curl` (optional)
 - Handles macOS timestamp differences (no `date +%N`)
 
-**Bash hook known issue fixed**: Timestamp calculation used `$(date +%N)` which returns "087" etc. This was interpreted as octal. Fixed with `10#$ms_part` to force decimal.
+**Dependencies:**
+- `jq` - **Required**. Used to parse and transform JSON events.
+- `curl` - **Optional**. Used for real-time server notifications. If missing, events are still written to JSONL (server watches file for changes via chokidar).
+
+**Known issue fixed**: Timestamp calculation used `$(date +%N)` which returns "087" etc. This was interpreted as octal. Fixed with `10#$ms_part` to force decimal.
 
 **Compact JSON**: Bash hook must use `jq -n -c` (not just `jq -n`) to avoid multi-line output breaking JSONL format.
 
@@ -551,6 +555,7 @@ Client rebuilds its local `claudeToManagedLink` map from server data on every `s
 
 ## Recent Features Added
 
+- **External Claude support**: Creates implicit managed sessions for Claude instances started outside Vibecraft (in regular terminal). External sessions get their own 3D zones with "ext" badge in sidebar
 - **Floating context labels**: Text sprites above stations showing current file/command
 - **Thought bubbles**: Animated bubbles when Claude is thinking (full) or working (small)
 - **Response capture**: Stop hook reads transcript to extract Claude's text response

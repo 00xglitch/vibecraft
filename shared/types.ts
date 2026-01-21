@@ -304,6 +304,8 @@ export interface ManagedSession {
     /** Original repository path */
     originalRepo: string
   }
+  /** Whether this is an implicit session (external Claude, no tmux control) */
+  implicit?: boolean
 }
 
 /** Git repository status */
@@ -367,6 +369,14 @@ export interface CreateSessionRequest {
     chrome?: boolean        // --chrome
     worktree?: boolean       // Create isolated git worktree
   }
+}
+
+/** Request to create an implicit session (external Claude, no tmux control) */
+export interface CreateImplicitSessionRequest {
+  /** Claude Code session ID from events */
+  claudeSessionId: string
+  /** Working directory (from event cwd) */
+  cwd?: string
 }
 
 /** Request to update a session */
