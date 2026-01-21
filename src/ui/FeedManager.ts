@@ -144,7 +144,7 @@ export class FeedManager {
     item.innerHTML = `
       <div class="feed-item-header">
         <div class="feed-item-icon thinking-icon">🤔</div>
-        <div class="feed-item-title">Claude is thinking</div>
+        <div class="feed-item-title">Agent is thinking</div>
         <div class="thinking-dots"><span>.</span><span>.</span><span>.</span></div>
       </div>
     `

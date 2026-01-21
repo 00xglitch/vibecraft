@@ -10,7 +10,7 @@ import * as THREE from 'three'
 import { WorkshopScene, ZONE_COLORS, type Zone, type CameraMode } from './scene/WorkshopScene'
 // Character models
 // import { Claude } from './entities/Claude'      // Original simple character
-import { Claude } from './entities/ClaudeMon'      // Robot buddy character
+import { Claude } from './entities/ClaudeMon'      // Robot buddy character (used for both Claude and OpenCode)
 import { Flower } from './entities/Flower'          // Flower head character
 import type { ICharacter, CharacterOptions } from './entities/ICharacter'
 import { SubagentManager } from './entities/SubagentManager'
@@ -59,6 +59,8 @@ import {
 } from './ui/PermissionModal'
 import { setupSlashCommands, isSlashCommand } from './ui/SlashCommands'
 import { setupDirectoryAutocomplete } from './ui/DirectoryAutocomplete'
+import { setupNewSessionModal, type SessionFlags } from './ui/NewSessionModal'
+import { fetchOpenCodeProviders } from './ui/OpenCodeProviderSelect'
 import { checkForUpdates } from './ui/VersionChecker'
 import { drawMode } from './ui/DrawMode'
 import { setupTextLabelModal, showTextLabelModal } from './ui/TextLabelModal'
@@ -429,13 +431,6 @@ function selectManagedSession(sessionId: string | null): void {
 /**
  * Create a new managed session
  */
-interface SessionFlags {
-  continue?: boolean
-  skipPermissions?: boolean
-  chrome?: boolean
-  worktree?: boolean
-}
-
 async function createManagedSession(
   name?: string,
   cwd?: string,
@@ -649,6 +644,42 @@ function setupManagedSessions(): void {
   const cancelBtn = document.getElementById('modal-cancel')
   const createBtn = document.getElementById('modal-create')
 
+  // Session type tabs
+  const claudeTab = modal?.querySelector('.session-type-tab[data-type="claude"]') as HTMLButtonElement
+  const opencodeTab = modal?.querySelector('.session-type-tab[data-type="opencode"]') as HTMLButtonElement
+  const claudeOptions = document.getElementById('claude-options')
+  const opencodeOptions = document.getElementById('opencode-options')
+  const opencodeModelField = document.getElementById('opencode-model-field')
+
+  let opencodeState = setupNewSessionModal(modal, {
+    onClaudeSession: (name, cwd, flags) => {
+      createManagedSession(name, cwd, flags, currentModalHint ?? undefined, `pending-${Date.now()}`)
+      closeModal()
+    },
+    onOpenCodeSession: async (data) => {
+      await createOpenCodeSession(data.name, data.cwd, currentModalHint)
+      closeModal()
+    }
+  })
+
+  // Session type description elements
+  const claudeDescription = modal?.querySelector('.session-type-description.claude')
+  const opencodeDescription = document.querySelector('.session-type-description.opencode')
+
+  // Update session type descriptions when tabs are clicked
+  const updateSessionTypeDescriptions = (type: 'claude' | 'opencode'): void => {
+    if (type === 'claude') {
+      claudeDescription?.classList.add('show')
+      opencodeDescription?.classList.remove('show')
+    } else {
+      claudeDescription?.classList.remove('show')
+      opencodeDescription?.classList.add('show')
+    }
+  }
+
+  // Initialize descriptions
+  updateSessionTypeDescriptions('claude')
+
   // Default cwd will be set by fetchServerInfo()
 
   // Setup directory autocomplete
@@ -704,46 +735,75 @@ function setupManagedSessions(): void {
     const name = nameInput?.value.trim() || undefined
     const cwd = cwdInput?.value.trim() || undefined
 
-    // Read flag checkboxes
-    const continueCheck = document.getElementById('session-opt-continue') as HTMLInputElement
-    const skipPermsCheck = document.getElementById('session-opt-skip-perms') as HTMLInputElement
-    const chromeCheck = document.getElementById('session-opt-chrome') as HTMLInputElement
-    const worktreeCheck = document.getElementById('session-opt-worktree') as HTMLInputElement
-
-    const flags: SessionFlags = {
-      continue: continueCheck?.checked ?? true,
-      skipPermissions: skipPermsCheck?.checked ?? true,
-      chrome: chromeCheck?.checked ?? false,
-      worktree: worktreeCheck?.checked ?? false,
-    }
-
     // Capture hint before closing modal (closeModal clears it)
     const hintPosition = currentModalHint
 
-    // Create pending zone immediately for visual feedback
-    const pendingId = `pending-${Date.now()}`
-    if (state.scene) {
-      state.scene.createPendingZone(pendingId, hintPosition ?? undefined)
+    if (opencodeState.sessionType === 'opencode') {
+      // Validate OpenCode session requires provider selection
+      const providerId = opencodeState.providerSelect?.getValue()
+      if (!providerId) {
+        alert('Please select a provider for OpenCode session')
+        return
+      }
+
+      // Create OpenCode session
+      createOpenCodeSession(name, cwd, hintPosition)
+    } else {
+      // Read flag checkboxes
+      const continueCheck = document.getElementById('session-opt-continue') as HTMLInputElement
+      const skipPermsCheck = document.getElementById('session-opt-skip-perms') as HTMLInputElement
+      const chromeCheck = document.getElementById('session-opt-chrome') as HTMLInputElement
+      const worktreeCheck = document.getElementById('session-opt-worktree') as HTMLInputElement
+
+      const flags: SessionFlags = {
+        continue: continueCheck?.checked ?? true,
+        skipPermissions: skipPermsCheck?.checked ?? true,
+        chrome: chromeCheck?.checked ?? false,
+        worktree: worktreeCheck?.checked ?? false,
+      }
+
+      // Create Claude session
+      createManagedSession(name, cwd, flags, hintPosition ?? undefined, `pending-${Date.now()}`)
     }
 
-    // Set timeout to show troubleshooting modal if zone doesn't start
-    const timeoutId = setTimeout(() => {
-      // Check if this pending zone still exists (wasn't cleaned up)
-      for (const [, pId] of pendingZonesToCleanup) {
-        if (pId === pendingId) {
-          showZoneTimeoutModal()
-          break
-        }
-      }
-      pendingZoneTimeouts.delete(pendingId)
-    }, ZONE_CREATION_TIMEOUT)
-    pendingZoneTimeouts.set(pendingId, timeoutId)
-
-    // Play confirm sound
-    soundManager.play('modal_confirm')
-
     closeModal()
-    createManagedSession(name, cwd, flags, hintPosition ?? undefined, pendingId)
+  }
+
+  // Create OpenCode session directly
+  const createOpenCodeSession = async (name: string | undefined, cwd: string | undefined, hintPosition: { x: number; z: number } | null): Promise<void> => {
+    const providerId = opencodeState.providerSelect?.getValue() ?? null
+    const modelId = opencodeState.modelSelect?.getValue() ?? null
+
+    try {
+      const response = await fetch('/sessions/opencode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, cwd, providerID: providerId ?? undefined, modelID: modelId ?? undefined }),
+      })
+
+      const data = await response.json()
+
+      if (!data.ok) {
+        alert(`Failed to create OpenCode session: ${data.error}`)
+        return
+      }
+
+      // Create pending zone for visual feedback
+      const pendingId = `pending-${Date.now()}`
+      if (state.scene && hintPosition) {
+        state.scene.createPendingZone(pendingId, hintPosition)
+      }
+
+      // Store hint for when zone appears
+      if (data.session?.name && hintPosition) {
+        pendingZoneHints.set(data.session.name, hintPosition)
+        pendingZonesToCleanup.set(data.session.name, pendingId)
+      }
+
+    } catch (error) {
+      console.error('Failed to create OpenCode session:', error)
+      alert('Failed to create OpenCode session')
+    }
   }
 
   const handleCancel = (): void => {
@@ -1375,22 +1435,32 @@ function setupDevPanel(): void {
     workingHeader.textContent = 'Working (by station)'
     animationsContainer.appendChild(workingHeader)
 
-    const stations = claudeRef.getWorkingBehaviorStations()
-    for (const station of stations) {
-      const btn = document.createElement('button')
-      btn.className = 'dev-anim-btn dev-anim-btn-working'
-      btn.textContent = station
-      btn.addEventListener('click', () => {
-        const target = getTargetClaude() as Claude | null
-        if (target) {
-          target.playWorkingBehavior(station)
-          document.querySelectorAll('.dev-anim-btn').forEach(b => b.classList.remove('playing'))
-          btn.classList.add('playing')
-          // Working behaviors loop, so keep playing indicator longer
-          setTimeout(() => btn.classList.remove('playing'), 4000)
-        }
-      })
-      animationsContainer.appendChild(btn)
+    // Check if character has working behavior methods
+    const hasWorkingBehaviors = 'getWorkingBehaviorStations' in claude
+
+    if (hasWorkingBehaviors) {
+      const stations = claude.getWorkingBehaviorStations()
+      for (const station of stations) {
+        const btn = document.createElement('button')
+        btn.className = 'dev-anim-btn dev-anim-btn-working'
+        btn.textContent = station
+        btn.addEventListener('click', () => {
+          const target = getTargetClaude()
+          if (target && 'playWorkingBehavior' in target) {
+            target.playWorkingBehavior(station)
+            document.querySelectorAll('.dev-anim-btn').forEach(b => b.classList.remove('playing'))
+            btn.classList.add('playing')
+            // Working behaviors loop, so keep playing indicator longer
+            setTimeout(() => btn.classList.remove('playing'), 4000)
+          }
+        })
+        animationsContainer.appendChild(btn)
+      }
+    } else {
+      const noBehaviors = document.createElement('div')
+      noBehaviors.className = 'dev-section-empty'
+      noBehaviors.textContent = 'No working behaviors available for this character'
+      animationsContainer.appendChild(noBehaviors)
     }
 
     // --- Stop Button ---
@@ -1518,7 +1588,8 @@ function getOrCreateSession(sessionId: string, eventCwd?: string): SessionState 
     const labelName = linkedManagedSession.projectName || linkedManagedSession.name
     const branch = linkedManagedSession.gitStatus?.branch
     state.scene.updateZoneLabel(sessionId, labelName, keybind, branch)
-    console.log(`Linked Claude session ${sessionId.slice(0, 8)} to "${linkedManagedSession.name}"`)
+    const sessionType = linkedManagedSession.sessionType === 'opencode' ? 'OpenCode' : 'Claude'
+    console.log(`Linked ${sessionType} session ${sessionId.slice(0, 8)} to "${linkedManagedSession.name}"`)
 
     // Save zone position to server if not already saved
     if (!linkedManagedSession.zonePosition) {
@@ -1530,22 +1601,25 @@ function getOrCreateSession(sessionId: string, eventCwd?: string): SessionState 
   }
 
   // Create character with matching color, positioned at zone center
-  const claude = createCharacter(state.scene, {
-    color: zone.color,
+  // OpenCode sessions get special indigo/purple colors
+  const isOpenCode = linkedManagedSession?.sessionType === 'opencode'
+  const character = createCharacter(state.scene, {
+    color: isOpenCode ? 0x6366f1 : zone.color, // OpenCode indigo or zone color
+    statusColor: isOpenCode ? 0x8b5cf6 : undefined, // OpenCode purple accent
     startStation: 'center',
   })
 
-  // Position Claude at the zone's center station
+  // Position character at the zone's center station
   const centerStation = zone.stations.get('center')
   if (centerStation) {
-    claude.mesh.position.copy(centerStation.position)
+    character.mesh.position.copy(centerStation.position)
   }
 
   // Create subagent manager
   const subagents = new SubagentManager(state.scene)
 
   session = {
-    claude,
+    claude: character as Claude,
     subagents,
     zone,
     color: zone.color,
@@ -1696,16 +1770,16 @@ function exitReplayMode(): void {
 }
 
 /**
- * Try to link a Claude session to a managed session
+ * Try to link a session to a managed session
  * Uses timing: looks for unlinked managed sessions created in the last 30 seconds
  */
-function tryLinkToManagedSession(claudeSessionId: string): ManagedSession | null {
+function tryLinkToSession(sessionId: string): ManagedSession | null {
   const now = Date.now()
   const LINK_WINDOW_MS = 30_000 // 30 seconds
 
   // Check if already linked
-  if (claudeToManagedLink.has(claudeSessionId)) {
-    const managedId = claudeToManagedLink.get(claudeSessionId)!
+  if (claudeToManagedLink.has(sessionId)) {
+    const managedId = claudeToManagedLink.get(sessionId)!
     return state.managedSessions.find(s => s.id === managedId) || null
   }
 
@@ -1718,11 +1792,11 @@ function tryLinkToManagedSession(claudeSessionId: string): ManagedSession | null
     const age = now - managed.createdAt
     if (age < LINK_WINDOW_MS) {
       // Link them!
-      claudeToManagedLink.set(claudeSessionId, managed.id)
-      managed.claudeSessionId = claudeSessionId
+      claudeToManagedLink.set(sessionId, managed.id)
+      managed.claudeSessionId = sessionId
 
       // Notify server about the link
-      linkSessionOnServer(managed.id, claudeSessionId)
+      linkSessionOnServer(managed.id, sessionId)
 
       return managed
     }
@@ -3249,37 +3323,39 @@ function init() {
     }
   })
 
-  // Handle managed sessions updates
-  state.client.onSessions((sessions) => {
-    // Reconcile local link map with server's authoritative data
-    // Server is the source of truth for session linking
-    claudeToManagedLink.clear()
-    for (const session of sessions) {
-      if (session.claudeSessionId) {
-        claudeToManagedLink.set(session.claudeSessionId, session.id)
+   // Handle managed sessions updates
+   state.client.onSessions((sessions) => {
+     // Reconcile local link map with server's authoritative data
+     // Server is the source of truth for session linking
+     claudeToManagedLink.clear()
+     for (const session of sessions) {
+       if (session.sessionType === 'claude' && session.claudeSessionId) {
+         claudeToManagedLink.set(session.claudeSessionId, session.id)
 
-        // Proactively create zone if it doesn't exist yet
-        // This handles sessions that have no recent events in history
-        if (state.scene && !state.scene.zones.has(session.claudeSessionId)) {
-          // Use saved position if available
-          let hintPosition: { x: number; z: number } | undefined
-          if (session.zonePosition) {
-            const cartesian = state.scene.hexGrid.axialToCartesian(session.zonePosition)
-            hintPosition = { x: cartesian.x, z: cartesian.z }
-            console.log(`Restoring zone for "${session.name}" at saved position`, session.zonePosition)
-          } else {
-            console.log(`Creating zone for session "${session.name}" (no recent events in history)`)
-          }
-          const zone = state.scene.createZone(session.claudeSessionId, { hintPosition })
+         // Proactively create zone if it doesn't exist yet
+         // This handles sessions that have no recent events in history
+         if (state.scene && !state.scene.zones.has(session.claudeSessionId)) {
+           // Use saved position if available
+           let hintPosition: { x: number; z: number } | undefined
+           if (session.zonePosition) {
+             const cartesian = state.scene.hexGrid.axialToCartesian(session.zonePosition)
+             hintPosition = { x: cartesian.x, z: cartesian.z }
+             console.log(`Restoring zone for "${session.name}" at saved position`, session.zonePosition)
+           } else {
+             console.log(`Creating zone for session "${session.name}" (no recent events in history)`)
+           }
+           const zone = state.scene.createZone(session.claudeSessionId, { hintPosition })
 
-          // Play zone creation sound
-          if (state.soundEnabled) {
-            soundManager.play('zone_create', { zoneId: session.claudeSessionId })
-          }
+           // Play zone creation sound
+           if (state.soundEnabled) {
+             soundManager.play('zone_create', { zoneId: session.claudeSessionId })
+           }
 
           // Create character entity for this zone
+          const isOpenCode = session.sessionType === 'opencode'
           const claude = createCharacter(state.scene, {
-            color: zone.color,
+            color: isOpenCode ? 0x6366f1 : zone.color,
+            statusColor: isOpenCode ? 0x8b5cf6 : undefined,
             startStation: 'center',
           })
           const centerStation = zone.stations.get('center')
@@ -3287,20 +3363,20 @@ function init() {
             claude.mesh.position.copy(centerStation.position)
           }
 
-          const subagents = new SubagentManager(state.scene)
+           const subagents = new SubagentManager(state.scene)
 
-          const sessionState: SessionState = {
-            claude,
-            subagents,
-            zone,
-            color: zone.color,
-            stats: {
-              toolsUsed: 0,
-              filesTouched: new Set(),
-              activeSubagents: 0,
-            },
-          }
-          state.sessions.set(session.claudeSessionId, sessionState)
+           const sessionState: SessionState = {
+             claude,
+             subagents,
+             zone,
+             color: zone.color,
+             stats: {
+               toolsUsed: 0,
+               filesTouched: new Set(),
+               activeSubagents: 0,
+             },
+           }
+           state.sessions.set(session.claudeSessionId, sessionState)
 
           // Update zone label with session name, project, and branch
           const keybindIndex = sessions.indexOf(session)
@@ -3310,26 +3386,87 @@ function init() {
           state.scene.updateZoneLabel(session.claudeSessionId, labelName, keybind, branch)
         }
 
-        // Update zone floor status based on session status
-        if (state.scene) {
-          // Map managed session status to zone status
-          const zoneStatus = session.status === 'working' ? 'working'
-            : session.status === 'waiting' ? 'waiting'
-            : session.status === 'offline' ? 'offline'
-            : 'idle'
-          state.scene.setZoneStatus(session.claudeSessionId, zoneStatus)
-        }
-      }
-    }
+         // Update zone floor status based on session status
+         if (state.scene) {
+           // Map managed session status to zone status
+           const zoneStatus = session.status === 'working' ? 'working'
+             : session.status === 'waiting' ? 'waiting'
+             : session.status === 'offline' ? 'offline'
+             : 'idle'
+           state.scene.setZoneStatus(session.claudeSessionId, zoneStatus)
+         }
+       } else if (session.sessionType === 'opencode') {
+         // Handle OpenCode sessions
+         const zoneId = session.id
+
+         if (state.scene && !state.scene.zones.has(zoneId)) {
+           // Use saved position if available
+           let hintPosition: { x: number; z: number } | undefined
+           if (session.zonePosition) {
+             const cartesian = state.scene.hexGrid.axialToCartesian(session.zonePosition)
+             hintPosition = { x: cartesian.x, z: cartesian.z }
+             console.log(`Restoring zone for OpenCode session "${session.name}" at saved position`, session.zonePosition)
+           } else {
+             console.log(`Creating zone for OpenCode session "${session.name}"`)
+           }
+           const zone = state.scene.createZone(zoneId, { hintPosition })
+
+           // Play zone creation sound
+           if (state.soundEnabled) {
+             soundManager.play('zone_create', { zoneId })
+           }
+
+           // Create OpenCode entity for this zone using ClaudeMon with OpenCode colors
+           const opencode = new Claude(state.scene, {
+             color: 0x6366f1, // OpenCode indigo
+             statusColor: 0x8b5cf6, // Purple accent
+             startStation: 'center',
+           })
+           const centerStation = zone.stations.get('center')
+           if (centerStation) {
+             opencode.mesh.position.copy(centerStation.position)
+           }
+
+           const subagents = new SubagentManager(state.scene)
+
+           const sessionState: SessionState = {
+             claude: opencode,
+             subagents,
+             zone,
+             color: zone.color,
+             stats: {
+               toolsUsed: 0,
+               filesTouched: new Set(),
+               activeSubagents: 0,
+             },
+           }
+           state.sessions.set(zoneId, sessionState)
+
+           // Update zone label with session name
+           const keybindIndex = sessions.indexOf(session)
+           const keybind = keybindIndex >= 0 ? getSessionKeybind(keybindIndex) : undefined
+           state.scene.updateZoneLabel(zoneId, session.name, keybind)
+         }
+
+         // Update zone floor status based on session status
+         if (state.scene) {
+           const zoneStatus = session.status === 'working' ? 'working'
+             : session.status === 'waiting' ? 'waiting'
+             : session.status === 'offline' ? 'offline'
+             : 'idle'
+           state.scene.setZoneStatus(zoneId, zoneStatus)
+         }
+       }
+     }
 
     // Clean up orphaned zones (zones not linked to any managed session)
     if (state.scene) {
-      const activeClaudeIds = new Set(
-        sessions.map(s => s.claudeSessionId).filter(Boolean)
+      const activeZoneIds = new Set(
+        sessions.map(s => s.sessionType === 'claude' ? s.claudeSessionId : s.id).filter(Boolean)
       )
       const zonesToDelete: string[] = []
       for (const [zoneId] of state.scene.zones) {
-        if (!activeClaudeIds.has(zoneId)) {
+        if (!activeZoneIds.has(zoneId)) {
           zonesToDelete.push(zoneId)
         }
       }
@@ -3361,8 +3498,9 @@ function init() {
         const workingSessions = sessions.filter(s => s.status === 'working')
         if (workingSessions.length === 0) {
           const session = newlyIdle[0]
-          if (session.claudeSessionId && state.scene) {
-            state.scene.focusZone(session.claudeSessionId)
+          const zoneId = session.sessionType === 'claude' ? session.claudeSessionId : session.id
+          if (zoneId && state.scene) {
+            state.scene.focusZone(zoneId)
             selectManagedSession(session.id)
           }
         }

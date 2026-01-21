@@ -113,7 +113,7 @@ export function showQuestionModal(data: QuestionData): void {
   if (!q) return
 
   if (badge) badge.textContent = q.header || 'Question'
-  if (header) header.textContent = 'Claude needs input'
+  if (header) header.textContent = 'Agent needs input'
   if (text) text.textContent = q.question
 
   // Clear previous options

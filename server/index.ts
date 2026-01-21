@@ -26,6 +26,7 @@ import type {
   PreToolUseEvent,
   PostToolUseEvent,
   ManagedSession,
+  ClaudeSession,
   CreateSessionRequest,
   CreateImplicitSessionRequest,
   UpdateSessionRequest,
@@ -39,7 +40,23 @@ import { DEFAULTS } from '../shared/defaults.js'
 import { GitStatusManager } from './GitStatusManager.js'
 import { ProjectsManager } from './ProjectsManager.js'
 import { detectProjectName } from './projectDetector.js'
+import { opencodeManager, OpenCodeServer } from './OpenCodeProcessManager.js'
 import { fileURLToPath } from 'url'
+import { OpencodeClient } from '@opencode-ai/sdk'
+import { sendPromptToOpenCodeSession, createOpenCodeSession, deleteOpenCodeSession, restartOpenCodeSession, checkOpenCodeHealth } from './opencode/index.js'
+import { registerOpenCodeRoutes } from './opencode/routes.js'
+
+// ============================================================================
+// OpenCode Integration State
+// ============================================================================
+
+const opencodeSessions = new Map<string, {
+  serverId: string
+  eventSource?: EventSource
+  abortController?: AbortController
+  client?: OpencodeClient
+  opencodeSessionId: string
+}>()
 
 // ============================================================================
 // Version (read from package.json)
@@ -580,9 +597,10 @@ function startTokenPolling(): void {
   // Poll every 2 seconds - poll all managed sessions
   setInterval(() => {
     for (const session of managedSessions.values()) {
-      // Skip implicit sessions - they don't have tmux to poll
+      // Skip implicit sessions and OpenCode sessions - they don't have tmux to poll
       if (isImplicitSession(session)) continue
-      if (session.status !== 'offline') {
+      if (session.sessionType === 'opencode') continue
+      if (session.status !== 'offline' && session.tmuxSession) {
         pollTokens(session.tmuxSession)
       }
     }
@@ -827,9 +845,10 @@ function startPermissionPolling(): void {
   // Poll every 1 second (more frequent than tokens since permissions are time-sensitive)
   setInterval(() => {
     for (const session of managedSessions.values()) {
-      // Skip implicit sessions - they don't have tmux to poll
+      // Skip implicit sessions and OpenCode sessions - they don't have tmux to poll
       if (isImplicitSession(session)) continue
-      if (session.status !== 'offline') {
+      if (session.sessionType === 'opencode') continue
+      if (session.status !== 'offline' && session.tmuxSession) {
         pollPermissions(session.id, session.tmuxSession)
       }
     }
@@ -845,6 +864,16 @@ function sendPermissionResponse(sessionId: string, optionNumber: string): boolea
   const session = managedSessions.get(sessionId)
   if (!session) {
     log(`Cannot send permission response: session ${sessionId} not found`)
+    return false
+  }
+
+  if (session.sessionType === 'opencode') {
+    log(`Cannot send permission response: OpenCode sessions handle permissions differently`)
+    return false
+  }
+
+  if (!session.tmuxSession) {
+    log(`Cannot send permission response: session has no tmux session`)
     return false
   }
 
@@ -990,9 +1019,10 @@ async function createSession(options: CreateSessionRequest = {}): Promise<Manage
         return
       }
 
-      const session: ManagedSession = {
+      const session: ClaudeSession = {
         id,
         name,
+        sessionType: 'claude',
         tmuxSession,
         status: 'idle',
         createdAt: Date.now(),
@@ -1157,6 +1187,16 @@ async function deleteSession(id: string): Promise<boolean> {
       return
     }
 
+    if (session.sessionType === 'opencode') {
+      deleteOpenCodeSession(id, { managedSessions, opencodeSessions, opencodeManager, gitStatusManager, log, broadcastSessions, saveSessions }).then(resolve).catch(() => resolve(false))
+      return
+    }
+
+    if (!session.tmuxSession) {
+      resolve(false)
+      return
+    }
+
     // Kill the tmux session using execFile to prevent shell injection
     try {
       validateTmuxSession(session.tmuxSession)
@@ -1184,9 +1224,18 @@ async function sendPromptToSession(id: string, prompt: string): Promise<{ ok: bo
     return { ok: false, error: 'Session not found' }
   }
 
+  // Handle OpenCode sessions
+  if (session.sessionType === 'opencode') {
+    return sendPromptToOpenCodeSession(session, prompt, { opencodeSessions, log })
+  }
+
   // Implicit sessions don't have tmux control
   if (isImplicitSession(session)) {
     return { ok: false, error: 'Cannot send prompts to external sessions (no tmux control)' }
+  }
+
+  if (!session.tmuxSession) {
+    return { ok: false, error: 'Session has no tmux session' }
   }
 
   try {
@@ -1205,13 +1254,17 @@ async function sendPromptToSession(id: string, prompt: string): Promise<{ ok: bo
  * Check if tmux sessions are still alive and update status
  */
 function checkSessionHealth(): void {
+  // Skip OpenCode sessions - they have their own health check
+  const claudeSessions = Array.from(managedSessions.values()).filter(s => s.sessionType !== 'opencode')
+
+  if (claudeSessions.length === 0) return
+
   exec('tmux list-sessions -F "#{session_name}"', EXEC_OPTIONS, (error, stdout) => {
     if (error) {
-      // tmux might not be running - mark non-implicit sessions as offline
-      for (const session of managedSessions.values()) {
+      // tmux might not be running - mark non-implicit Claude sessions as offline
+      for (const session of claudeSessions) {
         // Skip implicit sessions - they don't have tmux, so can't be "offline" in that sense
         if (isImplicitSession(session)) continue
-
         if (session.status !== 'offline') {
           session.status = 'offline'
         }
@@ -1222,11 +1275,10 @@ function checkSessionHealth(): void {
     const activeSessions = new Set(stdout.trim().split('\n'))
     let changed = false
 
-    for (const session of managedSessions.values()) {
+    for (const session of claudeSessions) {
       // Skip implicit sessions - they don't have tmux to check
       if (isImplicitSession(session)) continue
-
-      const isAlive = activeSessions.has(session.tmuxSession)
+      const isAlive = session.tmuxSession && activeSessions.has(session.tmuxSession)
       const newStatus = isAlive ? (session.status === 'offline' ? 'idle' : session.status) : 'offline'
 
       if (session.status !== newStatus) {
@@ -1800,6 +1852,22 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
     return
   }
 
+  // OpenCode routes
+  registerOpenCodeRoutes(req, res, {
+    opencodeManager,
+    managedSessions,
+    opencodeSessions,
+    createOpenCodeSession: (options) => createOpenCodeSession(options, { managedSessions, opencodeSessions, opencodeManager, gitStatusManager, projectsManager, addEvent, broadcastSessions, saveSessions, log, debug }),
+    deleteOpenCodeSession: (id) => deleteOpenCodeSession(id, { managedSessions, opencodeSessions, opencodeManager, gitStatusManager, log, broadcastSessions, saveSessions }),
+    restartOpenCodeSession: (id) => restartOpenCodeSession(id, { managedSessions, opencodeSessions, opencodeManager, log, broadcastSessions, saveSessions }),
+    debug,
+  })
+
+  // If OpenCode routes handled the request, stop here
+  if (req.url?.startsWith('/opencode') || req.url?.startsWith('/sessions/opencode')) {
+    return
+  }
+
   if (req.method === 'POST' && req.url === '/event') {
     collectRequestBody(req).then(body => {
       try {
@@ -2243,6 +2311,18 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
         return
       }
 
+      if (session.sessionType === 'opencode') {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: 'Cannot cancel OpenCode sessions via tmux' }))
+        return
+      }
+
+      if (!session.tmuxSession) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: 'Session has no tmux session' }))
+        return
+      }
+
       try {
         validateTmuxSession(session.tmuxSession)
       } catch {
@@ -2301,6 +2381,20 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
       if (!session) {
         res.writeHead(404, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ ok: false, error: 'Session not found' }))
+        return
+      }
+
+      if (session.sessionType === 'opencode') {
+        restartOpenCodeSession(sessionId, { managedSessions, opencodeSessions, opencodeManager, log, broadcastSessions, saveSessions }).then(result => {
+          res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify(result))
+        })
+        return
+      }
+
+      if (!session.tmuxSession) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: 'Session has no tmux session' }))
         return
       }
 
@@ -2719,6 +2813,9 @@ function main() {
 
     // Start working timeout checking (every 10 seconds)
     setInterval(checkWorkingTimeout, WORKING_CHECK_INTERVAL_MS)
+
+    // Start OpenCode health checking (every 5 seconds)
+    setInterval(() => checkOpenCodeHealth({ managedSessions, opencodeManager, broadcastSessions }), 5000)
 
     // Run initial health check to update session statuses
     checkSessionHealth()

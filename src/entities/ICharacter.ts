@@ -46,6 +46,7 @@ export interface ICharacter {
 /**
  * Available character models
  * Add new models here as they're created
+ * Note: 'claudemon' is used for both Claude and OpenCode characters (differentiated by color)
  */
 export type CharacterModel = 'claude' | 'claudemon' | 'flower'
 

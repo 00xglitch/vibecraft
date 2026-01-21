@@ -27,6 +27,12 @@ export default defineConfig({
         target: `http://localhost:${serverPort}`,
         rewrite: (path) => path.replace(/^\/api/, ''),
       },
+      '/sessions': {
+        target: `http://localhost:${serverPort}`,
+      },
+      '/opencode': {
+        target: `http://localhost:${serverPort}`,
+      },
     },
   },
   build: {
