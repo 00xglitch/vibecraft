@@ -969,13 +969,15 @@ async function createSession(options: CreateSessionRequest = {}): Promise<Manage
   const claudeCmd = claudeArgs.length > 0 ? `${claudeCommand} ${claudeArgs.join(' ')}` : claudeCommand
 
   // Spawn tmux session with claude using execFile to prevent shell injection
+  // NOTE: Must wrap in bash -c to ensure PATH is properly exported.
+  // Without this, tmux uses /bin/sh which doesn't handle PATH=... cmd syntax correctly.
   return new Promise((resolve, reject) => {
     execFile('tmux', [
       'new-session',
       '-d',
       '-s', tmuxSession,
       '-c', cwd,
-      `PATH=${EXEC_PATH} ${claudeCmd}`
+      `bash -c 'export PATH="${EXEC_PATH}"; ${claudeCmd}'`
     ], EXEC_OPTIONS, (error) => {
       if (error) {
         log(`Failed to spawn session: ${error.message}`)
@@ -2323,12 +2325,13 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
       // Kill existing tmux session if it exists (ignore errors)
       execFile('tmux', ['kill-session', '-t', session.tmuxSession], EXEC_OPTIONS, () => {
         // Respawn tmux session with claude using execFile
+        // NOTE: Must wrap in bash -c to ensure PATH is properly exported.
         execFile('tmux', [
           'new-session',
           '-d',
           '-s', session.tmuxSession,
           '-c', cwd,
-          `PATH=${EXEC_PATH} ${claudeCommand} -c --permission-mode=bypassPermissions --dangerously-skip-permissions`
+          `bash -c 'export PATH="${EXEC_PATH}"; ${claudeCommand} -c --permission-mode=bypassPermissions --dangerously-skip-permissions'`
         ], EXEC_OPTIONS, (error) => {
           if (error) {
             res.writeHead(500, { 'Content-Type': 'application/json' })
