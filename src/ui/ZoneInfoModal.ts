@@ -2,11 +2,27 @@
  * Zone Info Modal - Displays detailed information about a session/zone
  *
  * Shows session stats, git status, token usage, files touched, etc.
+ * For OpenCode sessions, also includes provider/model configuration.
  */
 
-import type { ManagedSession, GitStatus } from '../../shared/types'
+import type { ManagedSession, GitStatus, OpenCodeSession } from '../../shared/types'
 import { soundManager } from '../audio'
 import { formatTimeAgo } from './FeedManager'
+import {
+  SearchableSelect,
+  type SelectOption,
+} from './SearchableSelect'
+import {
+  fetchOpenCodeProviders,
+  fetchModelsForProvider,
+  createProviderSelect,
+  createModelSelect,
+  populateModelDropdown,
+  createLoadingProviderSelect,
+  getCachedProviders,
+  type OpenCodeProvider,
+  type OpenCodeModel,
+} from './OpenCodeProviderSelect'
 
 // ============================================================================
 // Types
@@ -29,6 +45,13 @@ export interface ZoneInfoData {
 
 let modal: HTMLElement | null = null
 let soundEnabled = true
+
+// Provider/Model configuration state
+let currentSessionId: string | null = null
+let providerSelect: SearchableSelect | null = null
+let modelSelect: SearchableSelect | null = null
+let currentProviderId: string | null = null
+let currentModelId: string | null = null
 
 // ============================================================================
 // Public API
@@ -71,6 +94,14 @@ export function showZoneInfoModal(data: ZoneInfoData): void {
 
   renderContent(data)
   modal.classList.add('visible')
+
+  // Fetch providers for OpenCode sessions
+  if (data.managedSession.sessionType === 'opencode') {
+    currentSessionId = data.managedSession.id
+    currentProviderId = (data.managedSession as OpenCodeSession).providerID ?? null
+    currentModelId = (data.managedSession as OpenCodeSession).modelID ?? null
+    fetchProviders()
+  }
 }
 
 /**
@@ -84,6 +115,195 @@ export function hideZoneInfoModal(): void {
   }
 
   modal.classList.remove('visible')
+  currentSessionId = null
+
+  // Clean up SearchableSelect instances
+  providerSelect?.destroy()
+  modelSelect?.destroy()
+  providerSelect = null
+  modelSelect = null
+}
+
+// ============================================================================
+// API
+// ============================================================================
+
+async function fetchProviders(): Promise<void> {
+  try {
+    const providers = await fetchOpenCodeProviders()
+
+    if (providers.length > 0) {
+      updateProviderDropdown()
+    }
+
+    if (providerSelect && providers.length > 0) {
+      const providerContainer = document.getElementById('zone-info-provider-container')
+      if (providerContainer) {
+        providerSelect.destroy()
+
+        providerSelect = createProviderSelect(providerContainer, {
+          onProviderSelect: async (provider) => {
+            currentProviderId = provider.id
+            await handleModelLoad(provider.id)
+            document.getElementById('zone-info-save')?.removeAttribute('disabled')
+          },
+          defaultProviderId: currentProviderId,
+        })
+
+        if (currentProviderId) {
+          await handleModelLoad(currentProviderId)
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Failed to fetch providers:', error)
+    if (providerSelect) {
+      providerSelect.setOptions([{ id: '', label: 'Failed to load providers', disabled: true }])
+      providerSelect.setDisabled(true)
+    }
+  }
+}
+
+async function saveSettings(): Promise<boolean> {
+  const providerId = providerSelect?.getValue() ?? null
+  const modelId = modelSelect?.getValue() ?? null
+
+  if (!currentSessionId) return false
+
+  try {
+    const response = await fetch(`/sessions/${currentSessionId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ providerID: providerId ?? undefined, modelID: modelId ?? undefined }),
+    })
+
+    if (!response.ok) {
+      throw new Error('Failed to save settings')
+    }
+
+    return true
+  } catch (error) {
+    console.error('Failed to save settings:', error)
+    return false
+  }
+}
+
+function updateProviderDropdown(): void {
+  if (providerSelect) {
+    const providers = getCachedProviders()
+    if (providers.length > 0) {
+      providerSelect.setOptions(providers.map(p => ({ id: p.id, label: p.name })))
+      providerSelect.setDisabled(false)
+    }
+  }
+}
+
+function updateModelInfo(model: OpenCodeModel | null): void {
+  const infoDiv = document.getElementById('zone-info-model-info')
+  if (!infoDiv) return
+
+  if (!model) {
+    infoDiv.classList.add('hidden')
+    return
+  }
+
+  infoDiv.classList.remove('hidden')
+
+  const capabilitiesDiv = infoDiv.querySelector('.zone-info-capabilities')
+  if (capabilitiesDiv) {
+    const caps = capabilitiesDiv.querySelectorAll('.zone-info-capability')
+    caps[0]?.classList.toggle('active', model.capabilities?.reasoning ?? false)
+    caps[1]?.classList.toggle('active', model.capabilities?.tool_call ?? false)
+    caps[2]?.classList.toggle('active', model.capabilities?.attachment ?? false)
+  }
+
+  const inputCost = model.cost?.input ?? 0
+  const outputCost = model.cost?.output ?? 0
+  const contextLimit = model.limit?.context ?? 0
+  const outputLimit = model.limit?.output ?? 0
+
+  const inputEl = document.getElementById('zone-info-cost-input')
+  const outputEl = document.getElementById('zone-info-cost-output')
+  const contextEl = document.getElementById('zone-info-limit-context')
+  const outputLimitEl = document.getElementById('zone-info-limit-output')
+
+  inputEl && (inputEl.textContent = inputCost > 0 ? `$${inputCost}/1M` : 'Free')
+  outputEl && (outputEl.textContent = outputCost > 0 ? `$${outputCost}/1M` : 'Free')
+  contextEl && (contextEl.textContent = contextLimit > 0 ? formatNumber(contextLimit) : 'N/A')
+  outputLimitEl && (outputLimitEl.textContent = outputLimit > 0 ? formatNumber(outputLimit) : 'N/A')
+}
+
+async function handleModelLoad(providerId: string): Promise<void> {
+  const models = await fetchModelsForProvider(providerId)
+  const provider = getCachedProviders().find(p => p.id === providerId)
+  const selectedModelId = modelSelect?.getValue() ?? currentModelId
+
+  populateModelDropdown(modelSelect!, models, selectedModelId)
+
+  if (selectedModelId) {
+    const model = provider?.models[selectedModelId]
+    updateModelInfo(model || null)
+  } else {
+    updateModelInfo(models[0] || null)
+  }
+}
+
+function setupProviderModelDropdowns(session: OpenCodeSession): void {
+  providerSelect?.destroy()
+  modelSelect?.destroy()
+  providerSelect = null
+  modelSelect = null
+
+  const providerContainer = document.getElementById('zone-info-provider-container')
+  const modelContainer = document.getElementById('zone-info-model-container')
+
+  currentProviderId = session.providerID ?? null
+  currentModelId = session.modelID ?? null
+
+  if (providerContainer) {
+    const providers = getCachedProviders()
+    if (providers.length > 0) {
+      providerSelect = createProviderSelect(providerContainer, {
+        onProviderSelect: async (provider) => {
+          currentProviderId = provider.id
+          await handleModelLoad(provider.id)
+          document.getElementById('zone-info-save')?.removeAttribute('disabled')
+        },
+        defaultProviderId: currentProviderId,
+      })
+    } else {
+      providerSelect = createLoadingProviderSelect(providerContainer)
+    }
+  }
+
+  if (modelContainer) {
+    modelSelect = createModelSelect(modelContainer, (model) => {
+      currentModelId = model?.id ?? null
+      if (currentProviderId) {
+        const provider = getCachedProviders().find(p => p.id === currentProviderId)
+        const fullModel = model ? provider?.models[model.id] : null
+        updateModelInfo(fullModel || null)
+      }
+      document.getElementById('zone-info-save')?.removeAttribute('disabled')
+    })
+  }
+
+  document.getElementById('zone-info-save')?.addEventListener('click', async () => {
+    const success = await saveSettings()
+    if (success) {
+      const currentProviderEl = document.getElementById('zone-info-current-provider')
+      const currentModelEl = document.getElementById('zone-info-current-model')
+      const providerId = providerSelect?.getValue() ?? null
+      const modelId = modelSelect?.getValue() ?? null
+
+      if (currentProviderEl) {
+        currentProviderEl.textContent = providerId ?? 'Default'
+      }
+      if (currentModelEl) {
+        currentModelEl.textContent = modelId ?? 'Default'
+      }
+    }
+  })
 }
 
 /**
@@ -103,6 +323,8 @@ function renderContent(data: ZoneInfoData): void {
 
   const { managedSession: s, stats } = data
   const filesTouched = stats?.filesTouched ? Array.from(stats.filesTouched) : []
+  const isOpenCode = s.sessionType === 'opencode'
+  const opencodeSession = s as OpenCodeSession
 
   content.innerHTML = `
     <!-- Header -->
@@ -118,9 +340,15 @@ function renderContent(data: ZoneInfoData): void {
         <span class="zone-info-value zone-info-mono">${escapeHtml(s.cwd || '~')}</span>
       </div>
       <div class="zone-info-row">
+        <span class="zone-info-label">Session Type</span>
+        <span class="zone-info-value">${isOpenCode ? 'OpenCode' : 'Claude'}</span>
+      </div>
+      ${s.tmuxSession ? `
+      <div class="zone-info-row">
         <span class="zone-info-label">tmux Session</span>
         <span class="zone-info-value zone-info-mono">${escapeHtml(s.tmuxSession)}</span>
       </div>
+      ` : ''}
       <div class="zone-info-row">
         <span class="zone-info-label">Created</span>
         <span class="zone-info-value">${formatTimeAgo(s.createdAt)}</span>
@@ -181,6 +409,50 @@ function renderContent(data: ZoneInfoData): void {
     </div>
     `}
 
+    ${isOpenCode ? `
+    <!-- Provider & Model Configuration -->
+    <div class="zone-info-section">
+      <div class="zone-info-section-title">Provider & Model Configuration</div>
+
+      <div class="zone-info-config-row">
+        <span class="zone-info-label">Current Provider</span>
+        <span class="zone-info-value" id="zone-info-current-provider">${opencodeSession.providerID ?? 'Default'}</span>
+      </div>
+      <div class="zone-info-config-row">
+        <span class="zone-info-label">Current Model</span>
+        <span class="zone-info-value" id="zone-info-current-model">${opencodeSession.modelID ?? 'Default'}</span>
+      </div>
+
+      <div class="zone-info-config-field">
+        <label class="zone-info-field-label">Provider</label>
+        <div id="zone-info-provider-container" class="zone-info-select-container"></div>
+      </div>
+
+      <div class="zone-info-config-field">
+        <label class="zone-info-field-label">Model</label>
+        <div id="zone-info-model-container" class="zone-info-select-container"></div>
+      </div>
+
+      <div id="zone-info-model-info" class="modal-field hidden">
+        <div class="zone-info-capabilities">
+          <span class="zone-info-capability">Reasoning</span>
+          <span class="zone-info-capability">Tools</span>
+          <span class="zone-info-capability">Attachments</span>
+        </div>
+        <div class="zone-info-cost">
+          Input: <span id="zone-info-cost-input">-</span> | Output: <span id="zone-info-cost-output">-</span>
+        </div>
+        <div class="zone-info-limit">
+          Context: <span id="zone-info-limit-context">-</span> | Output: <span id="zone-info-limit-output">-</span>
+        </div>
+      </div>
+
+      <div class="zone-info-actions">
+        <button type="button" class="modal-btn zone-info-btn zone-info-btn-primary" id="zone-info-save" disabled>Save Configuration</button>
+      </div>
+    </div>
+    ` : ''}
+
     <!-- Files Touched -->
     ${filesTouched.length > 0 ? `
     <div class="zone-info-section">
@@ -203,14 +475,24 @@ function renderContent(data: ZoneInfoData): void {
         <span class="zone-info-label">Managed ID</span>
         <span class="zone-info-value zone-info-mono zone-info-small">${s.id}</span>
       </div>
-      ${s.claudeSessionId ? `
+      ${isOpenCode ? `
+      <div class="zone-info-row">
+        <span class="zone-info-label">OpenCode Session</span>
+        <span class="zone-info-value zone-info-mono zone-info-small">${s.opencodeSessionId}</span>
+      </div>
+      ` : (s.claudeSessionId ? `
       <div class="zone-info-row">
         <span class="zone-info-label">Claude Session</span>
         <span class="zone-info-value zone-info-mono zone-info-small">${s.claudeSessionId}</span>
       </div>
-      ` : ''}
+      ` : '')}
     </div>
   `
+
+  // Initialize provider/model dropdowns for OpenCode sessions
+  if (isOpenCode) {
+    setupProviderModelDropdowns(opencodeSession)
+  }
 }
 
 function renderGitStatus(git: GitStatus): string {

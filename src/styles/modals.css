@@ -111,6 +111,10 @@
   margin-bottom: 16px;
 }
 
+.modal-field.hidden {
+  display: none;
+}
+
 .modal-field label {
   display: block;
   font-size: 13px;
@@ -192,6 +196,148 @@
   background: rgba(74, 222, 128, 0.3);
   border-color: rgba(74, 222, 128, 0.6);
   box-shadow: 0 0 20px rgba(74, 222, 128, 0.15);
+}
+
+/* Session Type Tabs */
+.session-type-tabs {
+  display: flex;
+  gap: 4px;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 4px;
+  border-radius: 8px;
+  margin-top: 4px;
+  position: relative;
+}
+
+.session-type-tab {
+  flex: 1;
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  position: relative;
+}
+
+.session-type-tab:hover {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.session-type-tab.active {
+  background: rgba(167, 139, 250, 0.3);
+  color: #a78bfa;
+}
+
+.session-type-tab[data-type="claude"].active {
+  background: rgba(74, 222, 128, 0.2);
+  color: #4ade80;
+}
+
+.session-type-tab[data-type="opencode"].active {
+  background: rgba(139, 92, 246, 0.2);
+  color: #8b5cf6;
+}
+
+/* Session type tooltips */
+.session-type-tab::after {
+  content: '';
+  position: absolute;
+  top: -24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(30, 30, 40, 0.95);
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s, visibility 0.2s, transform 0.2s;
+  pointer-events: none;
+  z-index: 100;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.session-type-tab:hover::after {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(4px);
+}
+
+.session-type-tab[data-type="claude"]::after {
+  content: 'Claude: Direct CLI interface with command flags';
+}
+
+.session-type-tab[data-type="opencode"]::after {
+  content: 'OpenCode: Provider aggregation with model selection';
+}
+
+/* Session type descriptions */
+.session-type-description {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.4);
+  margin-top: 8px;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  line-height: 1.4;
+}
+
+.session-type-description.claude {
+  border-left: 2px solid #4ade80;
+  display: none;
+}
+
+.session-type-description.opencode {
+  border-left: 2px solid #8b5cf6;
+  display: none;
+}
+
+.session-type-description.claude.show,
+.session-type-tab[data-type="claude"].active + .session-type-description.claude {
+  display: block;
+}
+
+.session-type-tab[data-type="opencode"].active + .session-type-description.opencode {
+  display: block;
+}
+
+/* Modal Select */
+.modal-select {
+  width: 100%;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.modal-select:hover {
+  border-color: rgba(167, 139, 250, 0.5);
+}
+
+.modal-select:focus {
+  outline: none;
+  border-color: #8b5cf6;
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.2);
+}
+
+.modal-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.modal-select option {
+  background: #1e293b;
+  color: #fff;
 }
 
 .modal-checkboxes {
@@ -1788,4 +1934,103 @@
 
 .zone-command-input::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.25);
+}
+
+/* ============================================================================
+   ZONE INFO MODAL - PROVIDER/MODEL CONFIGURATION
+   ============================================================================ */
+
+.zone-info-config-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 8px;
+  gap: 12px;
+}
+
+.zone-info-config-row:last-child {
+  margin-bottom: 12px;
+}
+
+.zone-info-config-field {
+  margin-bottom: 16px;
+}
+
+.zone-info-config-field:last-child {
+  margin-bottom: 0;
+}
+
+.zone-info-field-label {
+  display: block;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.6);
+  margin-bottom: 6px;
+}
+
+.zone-info-select-container {
+  width: 100%;
+}
+
+.zone-info-model-info {
+  margin-top: 16px;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.zone-info-capabilities {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.zone-info-capability {
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.zone-info-capability.active {
+  background: rgba(139, 92, 246, 0.2);
+  color: #a78bfa;
+  border-color: rgba(139, 92, 246, 0.3);
+}
+
+.zone-info-cost,
+.zone-info-limit {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  margin-bottom: 4px;
+}
+
+.zone-info-actions {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.zone-info-btn {
+  width: 100%;
+}
+
+.zone-info-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.zone-info-btn-primary {
+  background: rgba(139, 92, 246, 0.2);
+  border-color: rgba(139, 92, 246, 0.4);
+  color: #a78bfa;
+}
+
+.zone-info-btn-primary:hover:not(:disabled) {
+  background: rgba(139, 92, 246, 0.3);
+  border-color: rgba(139, 92, 246, 0.6);
+  box-shadow: 0 0 20px rgba(139, 92, 246, 0.15);
 }

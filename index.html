@@ -136,7 +136,7 @@
             <div id="feed-empty">
               <div id="feed-empty-icon">🛠️</div>
               <h3>Waiting for activity</h3>
-              <p>Start using Claude Code to see events here</p>
+              <p>Start using Agents to see events here</p>
             </div>
           </div>
           <button id="feed-scroll-bottom">↓ Jump to latest</button>
@@ -170,6 +170,14 @@
         </div>
 
         <div class="modal-field">
+          <label>Session Type</label>
+          <div class="session-type-tabs">
+            <button type="button" class="session-type-tab active" data-type="claude">Claude</button>
+            <button type="button" class="session-type-tab" data-type="opencode">OpenCode</button>
+          </div>
+        </div>
+
+        <div class="modal-field">
           <label for="session-cwd-input">Directory</label>
           <input type="text" id="session-cwd-input" placeholder="e.g. /home/user/my-project" autocomplete="off" />
           <div class="field-hint">Default: <code id="modal-default-cwd">~</code></div>
@@ -180,7 +188,8 @@
           <input type="text" id="session-name-input" placeholder="Auto-filled from directory..." autocomplete="off" />
         </div>
 
-        <div class="modal-field">
+        <!-- Claude Options -->
+        <div class="modal-field" id="claude-options">
           <label>Options</label>
           <div class="modal-checkboxes">
             <label class="modal-checkbox">
@@ -196,6 +205,21 @@
               <span class="checkbox-label">Chrome <code>--chrome</code></span>
             </label>
           </div>
+        </div>
+
+        <!-- OpenCode Options -->
+        <div class="modal-field hidden" id="opencode-options">
+          <label for="session-opencode-provider">Provider</label>
+          <select id="session-opencode-provider" class="modal-select">
+            <option value="">-- Select Provider --</option>
+          </select>
+        </div>
+
+        <div class="modal-field hidden" id="opencode-model-field">
+          <label for="session-opencode-model">Model</label>
+          <select id="session-opencode-model" class="modal-select" disabled>
+            <option value="">-- Select Provider First --</option>
+          </select>
         </div>
 
         <div class="modal-actions">
@@ -306,7 +330,7 @@
 
         <div class="about-section">
           <div class="about-section-title">Troubleshooting</div>
-          <p class="about-help-text">If a zone gets stuck, Claude Code may be waiting for input or in an unknown state. Attach to the tmux session to see what's happening:</p>
+          <p class="about-help-text">If a zone gets stuck, the agent may be waiting for input or in an unknown state.</p>
           <div class="about-commands">
             <div class="about-cmd"><code>tmux ls</code><span>List sessions</span></div>
             <div class="about-cmd"><code>tmux attach -t <em>session</em></code><span>Attach to session</span></div>
@@ -338,7 +362,7 @@
       <div class="modal-content question-modal-content">
         <div class="modal-header">
           <span class="question-badge" id="question-badge">Question</span>
-          <h3 id="question-header">Claude needs input</h3>
+          <h3 id="question-header">Agent needs input</h3>
         </div>
 
         <div class="question-text" id="question-text"></div>
@@ -425,7 +449,7 @@
           <h3>Zone Not Responding</h3>
         </div>
         <p class="zone-timeout-text">
-          The zone is taking longer than expected to start. Claude Code may be stuck or waiting for input.
+          The zone is taking longer than expected to start. The agent may be stuck or waiting for input.
         </p>
         <div class="about-section">
           <div class="about-section-title">Troubleshooting</div>
@@ -434,7 +458,7 @@
             <div class="about-cmd"><code>tmux attach -t <em>session</em></code><span>See what's happening</span></div>
           </div>
         </div>
-        <p class="zone-timeout-hint">Also ensure your Claude Code is up to date.</p>
+        <p class="zone-timeout-hint">Also ensure your agent is up to date.</p>
         <div class="modal-actions">
           <button type="button" class="modal-btn modal-btn-cancel" id="zone-timeout-close">Close</button>
         </div>

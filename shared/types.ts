@@ -260,21 +260,21 @@ export interface TaskToolInput {
 // Session Management (Orchestration)
 // ============================================================================
 
-/** Status of a managed Claude session */
+/** Status of a managed session */
 export type SessionStatus = 'idle' | 'working' | 'waiting' | 'offline'
 
-/** A managed Claude session */
-export interface ManagedSession {
+/** Base interface for all managed sessions */
+export interface ManagedSessionBase {
   /** Our internal ID (UUID) */
   id: string
   /** User-friendly name ("Frontend", "Tests") */
   name: string
-  /** Actual tmux session name */
-  tmuxSession: string
   /** Current status */
   status: SessionStatus
   /** Claude Code session ID (from events, may differ from our ID) */
   claudeSessionId?: string
+  /** Actual tmux session name (Claude only, undefined for OpenCode) */
+  tmuxSession?: string
   /** Creation timestamp */
   createdAt: number
   /** Last activity timestamp */
@@ -448,4 +448,133 @@ export const DEFAULT_CONFIG: VibecraftConfig = {
   eventsFile: './data/events.jsonl',
   maxEventsInMemory: 1000,
   debug: false,
+}
+
+// ============================================================================
+// OpenCode Integration (Phase 01)
+// ============================================================================
+
+export type SessionProvider = 'claude' | 'opencode'
+
+export interface ManagedSessionBase {
+  id: string
+  name: string
+  status: SessionStatus
+  createdAt: number
+  lastActivity: number
+  cwd?: string
+  currentTool?: string
+  gitStatus?: GitStatus
+  zonePosition?: { q: number; r: number }
+  tokens?: { current: number; cumulative: number }
+}
+
+export interface ClaudeSession extends ManagedSessionBase {
+  sessionType: 'claude'
+  tmuxSession: string
+  claudeSessionId?: string
+}
+
+export interface OpenCodeSession extends ManagedSessionBase {
+  sessionType: 'opencode'
+  opencodePort: number
+  opencodeSessionId: string
+  opencodeServerUrl: string
+  providerID?: string
+  modelID?: string
+}
+
+export type ManagedSession = ClaudeSession | OpenCodeSession
+
+export type OpenCodeEventType =
+  | 'message.part.updated'
+  | 'message.updated'
+  | 'session.status'
+  | 'session.created'
+  | 'session.updated'
+  | 'session.diff'
+  | 'session.error'
+  | 'session.idle'
+  | 'permission.asked'
+  | 'server.connected'
+  | 'server.heartbeat'
+  | 'file.watcher.updated'
+
+export interface OpenCodeEvent {
+  type: OpenCodeEventType
+  properties?: {
+    sessionID?: string
+    message?: {
+      content?: {
+        parts?: Array<{
+          type: string
+          text?: string
+          tool?: string
+        }>
+        text?: string
+      }
+    }
+    part?: {
+      id?: string
+      type: 'text' | 'tool' | 'reasoning' | 'step-start' | 'step-finish'
+      tool?: string
+      state?: {
+        status: 'started' | 'completed' | 'failed'
+        input?: Record<string, unknown>
+        output?: Record<string, unknown>
+        success?: boolean
+      }
+      text?: string
+      time?: {
+        start?: number
+        end?: number
+      }
+    }
+    diff?: {
+      summary?: string
+    }
+    error?: {
+      message?: string
+    }
+    permission?: {
+      permission: string
+      patterns?: string[]
+    }
+    cwd?: string
+  }
+}
+
+export const OPENCODE_TOOL_STATION_MAP: Record<string, StationType> = {
+  read: 'bookshelf',
+  write: 'desk',
+  edit: 'workbench',
+  bash: 'terminal',
+  glob: 'scanner',
+  grep: 'scanner',
+  websearch: 'antenna',
+  webfetch: 'antenna',
+  task: 'portal',
+  todowrite: 'taskboard',
+  notebookedit: 'desk',
+}
+
+export function getStationForOpenCodeTool(tool: string): StationType {
+  return OPENCODE_TOOL_STATION_MAP[tool.toLowerCase()] ?? 'center'
+}
+
+export function mapOpenCodeToolToVibecraft(opencodeTool: string): ToolName {
+  const mapping: Record<string, ToolName> = {
+    read: 'Read',
+    write: 'Write',
+    edit: 'Edit',
+    bash: 'Bash',
+    glob: 'Glob',
+    grep: 'Grep',
+    websearch: 'WebSearch',
+    webfetch: 'WebFetch',
+    task: 'Task',
+    todowrite: 'TodoWrite',
+    notebookedit: 'NotebookEdit',
+  }
+  return mapping[opencodeTool.toLowerCase()] ?? (opencodeTool as ToolName)
 }
