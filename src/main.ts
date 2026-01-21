@@ -337,6 +337,19 @@ function renderManagedSessions(): void {
 
     container.appendChild(el)
   })
+
+  // Add "+ New" button at the end of the grid
+  const newBtn = document.createElement('div')
+  newBtn.className = 'session-item new-session-card'
+  newBtn.innerHTML = `
+    <div class="session-icon">➕</div>
+    <div class="session-info">
+      <div class="session-name">New Session</div>
+      <div class="session-detail">Alt+N</div>
+    </div>
+  `
+  newBtn.addEventListener('click', () => openNewSessionModal())
+  container.appendChild(newBtn)
 }
 
 /**
