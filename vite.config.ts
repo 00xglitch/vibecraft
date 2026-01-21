@@ -23,6 +23,27 @@ export default defineConfig({
         target: `ws://localhost:${serverPort}`,
         ws: true,
       },
+      '/health': {
+        target: `http://localhost:${serverPort}`,
+      },
+      '/sessions': {
+        target: `http://localhost:${serverPort}`,
+      },
+      '/prompt': {
+        target: `http://localhost:${serverPort}`,
+      },
+      '/event': {
+        target: `http://localhost:${serverPort}`,
+      },
+      '/stats': {
+        target: `http://localhost:${serverPort}`,
+      },
+      '/cancel': {
+        target: `http://localhost:${serverPort}`,
+      },
+      '/token': {
+        target: `http://localhost:${serverPort}`,
+      },
       '/api': {
         target: `http://localhost:${serverPort}`,
         rewrite: (path) => path.replace(/^\/api/, ''),

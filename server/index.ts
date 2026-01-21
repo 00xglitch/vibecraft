@@ -226,24 +226,28 @@ async function sendToTmuxSafe(tmuxSession: string, text: string): Promise<void> 
   // Validate session name
   validateTmuxSession(tmuxSession)
 
-  // Create temp file with cryptographically secure random name
-  const tempFile = `/tmp/vibecraft-prompt-${Date.now()}-${randomBytes(16).toString('hex')}.txt`
-  writeFileSync(tempFile, text)
-
-  try {
-    // Load text into tmux buffer
-    await execFileAsync('tmux', ['load-buffer', tempFile])
-    // Paste buffer into session
-    await execFileAsync('tmux', ['paste-buffer', '-t', tmuxSession])
-    // Send Enter to submit
-    await new Promise(r => setTimeout(r, 100)) // Small delay like original
+  // Use send-keys -l (literal) for short prompts, paste-buffer for long ones
+  if (text.length < 500 && !text.includes('\n')) {
+    // Simple approach: send-keys -l followed by Enter
+    await execFileAsync('tmux', ['send-keys', '-t', tmuxSession, '-l', text])
+    await new Promise(r => setTimeout(r, 150))
     await execFileAsync('tmux', ['send-keys', '-t', tmuxSession, 'Enter'])
-  } finally {
-    // Clean up temp file
+  } else {
+    // For long/multiline text, use paste-buffer
+    const tempFile = `/tmp/vibecraft-prompt-${Date.now()}-${randomBytes(16).toString('hex')}.txt`
+    writeFileSync(tempFile, text)
+
     try {
-      unlinkSync(tempFile)
-    } catch {
-      // Ignore cleanup errors
+      await execFileAsync('tmux', ['load-buffer', tempFile])
+      await execFileAsync('tmux', ['paste-buffer', '-t', tmuxSession])
+      await new Promise(r => setTimeout(r, 300))
+      await execFileAsync('tmux', ['send-keys', '-t', tmuxSession, 'Enter'])
+    } finally {
+      try {
+        unlinkSync(tempFile)
+      } catch {
+        // Ignore cleanup errors
+      }
     }
   }
 }
