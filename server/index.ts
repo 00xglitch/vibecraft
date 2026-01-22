@@ -74,6 +74,7 @@ import {
 } from './orchestrator/index.js'
 import { ChangeTracker } from './ChangeTracker.js'
 import { julesService } from './JulesService.js'
+import { mcpMarketplace } from './MCPMarketplace.js'
 
 // ============================================================================
 // OpenCode Integration State
@@ -2936,6 +2937,158 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
       res.writeHead(404, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ ok: false, error: 'Task not found' }))
     }
+    return
+  }
+
+  // ==========================================================================
+  // MCP Marketplace API
+  // ==========================================================================
+
+  // GET /api/mcp/servers - List all available MCP servers
+  if (req.method === 'GET' && req.url === '/api/mcp/servers') {
+    mcpMarketplace
+      .getServers()
+      .then((servers) => {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, servers }))
+      })
+      .catch((err) => {
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: err.message }))
+      })
+    return
+  }
+
+  // GET /api/mcp/servers/featured - Get featured/popular servers
+  if (req.method === 'GET' && req.url === '/api/mcp/servers/featured') {
+    mcpMarketplace
+      .getFeatured()
+      .then((servers) => {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, servers }))
+      })
+      .catch((err) => {
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: err.message }))
+      })
+    return
+  }
+
+  // GET /api/mcp/categories - Get all categories
+  if (req.method === 'GET' && req.url === '/api/mcp/categories') {
+    mcpMarketplace
+      .getCategories()
+      .then((categories) => {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, categories }))
+      })
+      .catch((err) => {
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: err.message }))
+      })
+    return
+  }
+
+  // GET /api/mcp/installed - Get installed MCP servers
+  if (req.method === 'GET' && req.url === '/api/mcp/installed') {
+    const installed = mcpMarketplace.getInstalled()
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ ok: true, servers: installed }))
+    return
+  }
+
+  // GET /api/mcp/search?q=query - Search for MCP servers
+  if (req.method === 'GET' && req.url?.startsWith('/api/mcp/search')) {
+    const urlObj = new URL(req.url, `http://localhost:${PORT}`)
+    const query = urlObj.searchParams.get('q') || ''
+    mcpMarketplace
+      .search(query)
+      .then((servers) => {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, servers }))
+      })
+      .catch((err) => {
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: err.message }))
+      })
+    return
+  }
+
+  // POST /api/mcp/install - Install an MCP server
+  if (req.method === 'POST' && req.url === '/api/mcp/install') {
+    collectRequestBody(req)
+      .then(async (body) => {
+        try {
+          const { serverId, envVars } = JSON.parse(body)
+          if (!serverId) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ ok: false, error: 'serverId is required' }))
+            return
+          }
+          const result = await mcpMarketplace.install(serverId, envVars)
+          res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify(result))
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: 'Invalid JSON' }))
+        }
+      })
+      .catch(() => {
+        res.writeHead(413, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Request body too large' }))
+      })
+    return
+  }
+
+  // POST /api/mcp/uninstall - Uninstall an MCP server
+  if (req.method === 'POST' && req.url === '/api/mcp/uninstall') {
+    collectRequestBody(req)
+      .then(async (body) => {
+        try {
+          const { serverId } = JSON.parse(body)
+          if (!serverId) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ ok: false, error: 'serverId is required' }))
+            return
+          }
+          const result = await mcpMarketplace.uninstall(serverId)
+          res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify(result))
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: 'Invalid JSON' }))
+        }
+      })
+      .catch(() => {
+        res.writeHead(413, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Request body too large' }))
+      })
+    return
+  }
+
+  // POST /api/mcp/configure - Configure an installed MCP server
+  if (req.method === 'POST' && req.url === '/api/mcp/configure') {
+    collectRequestBody(req)
+      .then(async (body) => {
+        try {
+          const { serverId, envVars } = JSON.parse(body)
+          if (!serverId) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ ok: false, error: 'serverId is required' }))
+            return
+          }
+          const result = await mcpMarketplace.configure(serverId, envVars || {})
+          res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify(result))
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: 'Invalid JSON' }))
+        }
+      })
+      .catch(() => {
+        res.writeHead(413, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Request body too large' }))
+      })
     return
   }
 

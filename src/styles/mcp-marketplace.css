@@ -1,0 +1,347 @@
+/**
+ * MCP Marketplace Modal Styles
+ */
+
+/* Modal Layout */
+.mcp-marketplace-modal {
+  width: 90vw;
+  max-width: 900px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.mcp-marketplace-body {
+  display: flex;
+  gap: 1rem;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Search Bar */
+.mcp-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  background: var(--surface-1);
+  border-radius: 8px;
+  margin: 0 1rem 1rem 1rem;
+}
+
+.mcp-search-icon {
+  font-size: 1rem;
+  opacity: 0.6;
+}
+
+.mcp-search-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  outline: none;
+}
+
+.mcp-search-input::placeholder {
+  color: var(--text-muted);
+}
+
+/* Sidebar */
+.mcp-sidebar {
+  width: 180px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 0 0 1rem 1rem;
+  overflow-y: auto;
+}
+
+.mcp-sidebar-title {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin: 0;
+  padding: 0.5rem 0;
+}
+
+/* Category List */
+.mcp-category-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.mcp-category-btn {
+  padding: 0.5rem 0.75rem;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.mcp-category-btn:hover {
+  background: var(--surface-1);
+  color: var(--text-primary);
+}
+
+.mcp-category-btn.mcp-category-active {
+  background: var(--accent-primary);
+  color: white;
+}
+
+/* Installed List */
+.mcp-installed-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.mcp-installed-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.4rem 0.6rem;
+  background: var(--surface-1);
+  border-radius: 6px;
+  font-size: 0.8rem;
+}
+
+.mcp-installed-name {
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mcp-uninstall-btn {
+  padding: 0.2rem 0.4rem;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 0.15s ease;
+}
+
+.mcp-uninstall-btn:hover {
+  opacity: 1;
+  color: #f87171;
+}
+
+/* Main Content */
+.mcp-main {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 1rem 1rem 0;
+}
+
+/* Server Grid */
+.mcp-server-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+/* Server Card */
+.mcp-server-card {
+  background: var(--surface-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  transition: all 0.15s ease;
+}
+
+.mcp-server-card:hover {
+  border-color: var(--accent-primary);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.mcp-server-card.mcp-server-installed {
+  border-color: #22c55e44;
+  background: linear-gradient(135deg, var(--surface-1), rgba(34, 197, 94, 0.05));
+}
+
+/* Server Header */
+.mcp-server-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.mcp-server-name {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.mcp-official-badge {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.15);
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+}
+
+/* Server Description */
+.mcp-server-desc {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.5;
+  flex: 1;
+}
+
+/* Server Categories */
+.mcp-server-categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.mcp-category-tag {
+  font-size: 0.7rem;
+  padding: 0.2rem 0.5rem;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  border-radius: 4px;
+}
+
+/* Server Actions */
+.mcp-server-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: auto;
+  padding-top: 0.5rem;
+}
+
+/* MCP Buttons */
+.mcp-btn {
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.mcp-btn-primary {
+  background: var(--accent-primary);
+  color: white;
+}
+
+.mcp-btn-primary:hover {
+  filter: brightness(1.1);
+}
+
+.mcp-btn-secondary {
+  background: var(--surface-2);
+  color: var(--text-secondary);
+}
+
+.mcp-btn-secondary:hover {
+  background: var(--surface-3);
+}
+
+.mcp-btn-danger {
+  background: rgba(248, 113, 113, 0.2);
+  color: #f87171;
+}
+
+.mcp-btn-danger:hover {
+  background: rgba(248, 113, 113, 0.3);
+}
+
+/* Empty State */
+.mcp-empty {
+  padding: 2rem;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+/* Loading State */
+.mcp-loading {
+  padding: 3rem;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+/* Environment Variables Modal */
+.mcp-env-overlay {
+  z-index: 1001;
+}
+
+.mcp-env-modal {
+  width: 400px;
+  max-width: 90vw;
+}
+
+.mcp-env-modal h3 {
+  margin: 0 0 1rem 0;
+  font-size: 1.1rem;
+  color: var(--text-primary);
+}
+
+.mcp-env-desc {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  margin: 0 0 1rem 0;
+}
+
+.mcp-env-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 1rem;
+}
+
+.mcp-env-group label {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  font-family: monospace;
+}
+
+.mcp-env-input {
+  padding: 0.6rem 0.8rem;
+  background: var(--surface-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  font-family: monospace;
+}
+
+.mcp-env-input:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
+.mcp-env-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-subtle);
+}
