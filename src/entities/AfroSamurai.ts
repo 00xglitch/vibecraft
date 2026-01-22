@@ -1,29 +1,43 @@
 /**
  * AfroSamurai - Cool samurai character with iconic afro
  *
- * Design: Stylish character with large afro and samurai elements
- * - Large spherical afro hairstyle
- * - Determined eyes with headband
- * - Slim body with simple katana
+ * Design: Stylish Black samurai warrior with large afro and traditional outfit
+ * - Large spherical afro hairstyle (dark brown/black)
+ * - Determined eyes with red headband
+ * - Realistic brown skin tone
+ * - Traditional samurai kimono with detailed obi
+ * - Visible skin at neck/hands/arm openings
+ * - Katana on back
  */
 
 import * as THREE from 'three'
 import type { StationType } from '../../shared/types'
 import type { WorkshopScene } from '../scene/WorkshopScene'
 import type { ICharacter, CharacterOptions, CharacterState } from './ICharacter'
-import {
-  IdleBehaviorManager,
-  WorkingBehaviorManager,
-  type CharacterParts,
-} from './animations'
+import { IdleBehaviorManager, WorkingBehaviorManager, type CharacterParts } from './animations'
 
 export type AfroSamuraiOptions = CharacterOptions
 
 const DEFAULT_OPTIONS: Required<AfroSamuraiOptions> = {
   scale: 1,
-  color: 0x2d1810, // Dark brown for afro
+  color: 0x1a0f0a, // Very dark brown for afro
   statusColor: 0x4ade80,
   startStation: 'center',
+}
+
+// Color palette
+const COLORS = {
+  skin: 0x8b5a3c, // Rich brown skin tone
+  skinDark: 0x6b4530, // Darker shade for shadows
+  afro: 0x1a0f0a, // Very dark brown/black afro
+  kimono: 0x1a1a2e, // Dark navy kimono
+  kimonoAccent: 0x2d2d44, // Lighter accent for folds
+  obi: 0x8b0000, // Deep red obi (belt)
+  obiAccent: 0xc41e3a, // Brighter red accent
+  headband: 0xcc2222, // Red headband
+  gold: 0xc9a227, // Gold accents
+  leather: 0x3d2817, // Dark leather for scabbard
+  wood: 0x5c3a21, // Wood handle
 }
 
 export class AfroSamurai implements ICharacter {
@@ -36,19 +50,20 @@ export class AfroSamurai implements ICharacter {
   private options: Required<AfroSamuraiOptions>
   private targetPosition: THREE.Vector3 | null = null
   private moveSpeed = 3
-  private bobTime = 0
-  private workTime = 0
-  private thinkTime = 0
+  private animTime = 0
   private updateCallback: ((delta: number) => void) | null = null
 
-  // Body parts for animation
+  // Body parts for animation - store base positions
   private head: THREE.Group
+  private headBaseY = 0 // Track base Y position for head
   private visor: THREE.Mesh
   private leftEye: THREE.Mesh
   private rightEye: THREE.Mesh
   private body: THREE.Group
   private leftArm: THREE.Group
   private rightArm: THREE.Group
+  private leftLeg: THREE.Group
+  private rightLeg: THREE.Group
   private antenna: THREE.Group
   private statusRing: THREE.Mesh
 
@@ -63,23 +78,31 @@ export class AfroSamurai implements ICharacter {
     this.mesh = new THREE.Group()
 
     // Create all parts
+    this.body = this.createBody()
     this.head = this.createHead()
+    this.leftArm = this.createArm(true)
+    this.rightArm = this.createArm(false)
+    this.leftLeg = this.createLeg(true)
+    this.rightLeg = this.createLeg(false)
+    this.antenna = new THREE.Group() // Empty for compatibility
+    this.statusRing = this.createStatusRing()
+
+    // Get references to animatable parts
     this.visor = this.head.getObjectByName('visor') as THREE.Mesh
     this.leftEye = this.head.getObjectByName('leftEye') as THREE.Mesh
     this.rightEye = this.head.getObjectByName('rightEye') as THREE.Mesh
 
-    this.body = this.createBody()
-    this.leftArm = this.createArm(true)
-    this.rightArm = this.createArm(false)
-    this.antenna = new THREE.Group() // Empty for compatibility
-
-    this.statusRing = this.createStatusRing()
-
-    this.mesh.add(this.head)
+    // Add to mesh group in correct order
     this.mesh.add(this.body)
+    this.mesh.add(this.leftLeg)
+    this.mesh.add(this.rightLeg)
     this.mesh.add(this.leftArm)
     this.mesh.add(this.rightArm)
+    this.mesh.add(this.head)
     this.mesh.add(this.statusRing)
+
+    // Store head base position for animation reference
+    this.headBaseY = this.head.position.y
 
     // Initialize behavior systems
     this.idleBehaviorManager = new IdleBehaviorManager()
@@ -106,72 +129,135 @@ export class AfroSamurai implements ICharacter {
   private createHead(): THREE.Group {
     const group = new THREE.Group()
 
-    // Face (tan skin)
-    const faceGeo = new THREE.SphereGeometry(0.35, 16, 12)
-    const faceMat = new THREE.MeshStandardMaterial({
-      color: 0xc4956a,
+    // Neck (connects head to body)
+    const neckGeo = new THREE.CylinderGeometry(0.08, 0.1, 0.12, 8)
+    const skinMat = new THREE.MeshStandardMaterial({
+      color: COLORS.skin,
       roughness: 0.8,
     })
-    const face = new THREE.Mesh(faceGeo, faceMat)
-    face.position.y = 1.2
+    const neck = new THREE.Mesh(neckGeo, skinMat)
+    neck.position.y = -0.1
+    group.add(neck)
+
+    // Face/Head (proper brown skin)
+    const faceGeo = new THREE.SphereGeometry(0.28, 16, 12)
+    const face = new THREE.Mesh(faceGeo, skinMat)
+    face.position.y = 0.15
+    face.scale.set(1, 1.1, 0.95) // Slightly elongated
     group.add(face)
 
-    // Afro (large dark sphere)
-    const afroGeo = new THREE.SphereGeometry(0.55, 20, 16)
+    // Afro (large dark sphere with texture feel)
+    const afroGeo = new THREE.SphereGeometry(0.48, 24, 20)
     const afroMat = new THREE.MeshStandardMaterial({
-      color: this.options.color,
+      color: COLORS.afro,
       roughness: 1,
+      metalness: 0,
     })
     const afro = new THREE.Mesh(afroGeo, afroMat)
-    afro.position.y = 1.35
-    afro.position.z = -0.05
+    afro.position.y = 0.32
+    afro.position.z = -0.08
     group.add(afro)
 
-    // Headband (red)
-    const headbandGeo = new THREE.TorusGeometry(0.38, 0.04, 8, 24)
+    // Afro texture bumps (small spheres for volume)
+    for (let i = 0; i < 12; i++) {
+      const bumpGeo = new THREE.SphereGeometry(0.08 + Math.random() * 0.05, 8, 8)
+      const bump = new THREE.Mesh(bumpGeo, afroMat)
+      const angle = (i / 12) * Math.PI * 2
+      const radius = 0.4
+      bump.position.set(
+        Math.cos(angle) * radius * (0.8 + Math.random() * 0.4),
+        0.32 + Math.random() * 0.15,
+        Math.sin(angle) * radius * 0.6 - 0.08
+      )
+      group.add(bump)
+    }
+
+    // Headband (red cloth wrapped around forehead)
+    const headbandGeo = new THREE.TorusGeometry(0.32, 0.025, 8, 32)
     const headbandMat = new THREE.MeshStandardMaterial({
-      color: 0xcc2222,
-      roughness: 0.5,
+      color: COLORS.headband,
+      roughness: 0.6,
     })
     const headband = new THREE.Mesh(headbandGeo, headbandMat)
-    headband.position.y = 1.25
+    headband.position.y = 0.22
     headband.rotation.x = Math.PI / 2
     group.add(headband)
 
-    // Headband tail
-    const tailGeo = new THREE.BoxGeometry(0.08, 0.3, 0.02)
-    const tail = new THREE.Mesh(tailGeo, headbandMat)
-    tail.position.set(-0.35, 1.1, 0)
-    tail.rotation.z = 0.3
-    group.add(tail)
+    // Headband tails (flowing behind)
+    const tailMat = new THREE.MeshStandardMaterial({
+      color: COLORS.headband,
+      roughness: 0.7,
+      side: THREE.DoubleSide,
+    })
 
-    // Eyes - determined look
-    const eyeGeo = new THREE.SphereGeometry(0.06, 8, 8)
-    const eyeMat = new THREE.MeshStandardMaterial({ color: 0x111111 })
+    const tail1Geo = new THREE.PlaneGeometry(0.06, 0.35)
+    const tail1 = new THREE.Mesh(tail1Geo, tailMat)
+    tail1.position.set(-0.28, 0.05, -0.15)
+    tail1.rotation.set(0.3, 0.2, 0.4)
+    group.add(tail1)
+
+    const tail2Geo = new THREE.PlaneGeometry(0.05, 0.3)
+    const tail2 = new THREE.Mesh(tail2Geo, tailMat)
+    tail2.position.set(-0.32, 0.02, -0.12)
+    tail2.rotation.set(0.4, 0.3, 0.5)
+    group.add(tail2)
+
+    // Eyes - determined look with slight squint
+    const eyeWhiteGeo = new THREE.SphereGeometry(0.045, 8, 8)
+    const eyeWhiteMat = new THREE.MeshStandardMaterial({ color: 0xfaf8f5 })
+
+    const eyeGeo = new THREE.SphereGeometry(0.025, 8, 8)
+    const eyeMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a })
+
+    // Left eye
+    const leftEyeWhite = new THREE.Mesh(eyeWhiteGeo, eyeWhiteMat)
+    leftEyeWhite.position.set(-0.09, 0.18, 0.22)
+    leftEyeWhite.scale.set(1, 0.7, 0.5) // Squinted
+    group.add(leftEyeWhite)
 
     const leftEye = new THREE.Mesh(eyeGeo, eyeMat)
-    leftEye.position.set(-0.12, 1.22, 0.28)
+    leftEye.position.set(-0.09, 0.17, 0.24)
     leftEye.name = 'leftEye'
     group.add(leftEye)
 
+    // Right eye
+    const rightEyeWhite = new THREE.Mesh(eyeWhiteGeo, eyeWhiteMat)
+    rightEyeWhite.position.set(0.09, 0.18, 0.22)
+    rightEyeWhite.scale.set(1, 0.7, 0.5)
+    group.add(rightEyeWhite)
+
     const rightEye = new THREE.Mesh(eyeGeo, eyeMat)
-    rightEye.position.set(0.12, 1.22, 0.28)
+    rightEye.position.set(0.09, 0.17, 0.24)
     rightEye.name = 'rightEye'
     group.add(rightEye)
 
-    // Eyebrows - serious/determined
-    const browGeo = new THREE.BoxGeometry(0.12, 0.03, 0.02)
-    const browMat = new THREE.MeshStandardMaterial({ color: 0x111111 })
+    // Eyebrows - thick, serious
+    const browGeo = new THREE.BoxGeometry(0.08, 0.02, 0.02)
+    const browMat = new THREE.MeshStandardMaterial({ color: COLORS.afro })
 
     const leftBrow = new THREE.Mesh(browGeo, browMat)
-    leftBrow.position.set(-0.12, 1.32, 0.3)
-    leftBrow.rotation.z = 0.2
+    leftBrow.position.set(-0.09, 0.26, 0.24)
+    leftBrow.rotation.z = 0.15
     group.add(leftBrow)
 
     const rightBrow = new THREE.Mesh(browGeo, browMat)
-    rightBrow.position.set(0.12, 1.32, 0.3)
-    rightBrow.rotation.z = -0.2
+    rightBrow.position.set(0.09, 0.26, 0.24)
+    rightBrow.rotation.z = -0.15
     group.add(rightBrow)
+
+    // Nose - subtle
+    const noseGeo = new THREE.SphereGeometry(0.04, 6, 6)
+    const nose = new THREE.Mesh(noseGeo, skinMat)
+    nose.position.set(0, 0.12, 0.26)
+    nose.scale.set(0.8, 1, 0.6)
+    group.add(nose)
+
+    // Mouth line
+    const mouthGeo = new THREE.BoxGeometry(0.06, 0.01, 0.01)
+    const mouthMat = new THREE.MeshStandardMaterial({ color: COLORS.skinDark })
+    const mouth = new THREE.Mesh(mouthGeo, mouthMat)
+    mouth.position.set(0, 0.04, 0.26)
+    group.add(mouth)
 
     // Visor placeholder for animation compatibility
     const visor = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.01, 0.01))
@@ -179,118 +265,277 @@ export class AfroSamurai implements ICharacter {
     visor.name = 'visor'
     group.add(visor)
 
+    // Position head group
+    group.position.y = 0.95
+
     return group
   }
 
   private createBody(): THREE.Group {
     const group = new THREE.Group()
 
-    // Torso (dark kimono/robe)
-    const torsoGeo = new THREE.CylinderGeometry(0.22, 0.28, 0.5, 8)
-    const torsoMat = new THREE.MeshStandardMaterial({
-      color: 0x1a1a2e,
-      roughness: 0.9,
+    const kimonoMat = new THREE.MeshStandardMaterial({
+      color: COLORS.kimono,
+      roughness: 0.85,
     })
-    const torso = new THREE.Mesh(torsoGeo, torsoMat)
-    torso.position.y = 0.6
+
+    const kimonoAccentMat = new THREE.MeshStandardMaterial({
+      color: COLORS.kimonoAccent,
+      roughness: 0.8,
+    })
+
+    // Upper torso (V-neck showing skin)
+    const torsoGeo = new THREE.CylinderGeometry(0.18, 0.22, 0.35, 8)
+    const torso = new THREE.Mesh(torsoGeo, kimonoMat)
+    torso.position.y = 0.62
     group.add(torso)
 
-    // Belt/obi
-    const beltGeo = new THREE.CylinderGeometry(0.24, 0.24, 0.08, 8)
-    const beltMat = new THREE.MeshStandardMaterial({
-      color: 0x333355,
+    // Chest skin visible at V-neck
+    const chestGeo = new THREE.SphereGeometry(0.12, 8, 8)
+    const skinMat = new THREE.MeshStandardMaterial({
+      color: COLORS.skin,
+      roughness: 0.8,
+    })
+    const chest = new THREE.Mesh(chestGeo, skinMat)
+    chest.position.set(0, 0.72, 0.08)
+    chest.scale.set(1, 0.8, 0.5)
+    group.add(chest)
+
+    // Kimono collar/lapels (crossing V-shape)
+    const collarGeo = new THREE.BoxGeometry(0.08, 0.25, 0.04)
+
+    const leftCollar = new THREE.Mesh(collarGeo, kimonoAccentMat)
+    leftCollar.position.set(-0.06, 0.7, 0.12)
+    leftCollar.rotation.z = -0.3
+    leftCollar.rotation.y = 0.2
+    group.add(leftCollar)
+
+    const rightCollar = new THREE.Mesh(collarGeo, kimonoAccentMat)
+    rightCollar.position.set(0.06, 0.7, 0.12)
+    rightCollar.rotation.z = 0.3
+    rightCollar.rotation.y = -0.2
+    group.add(rightCollar)
+
+    // Lower torso
+    const lowerTorsoGeo = new THREE.CylinderGeometry(0.22, 0.2, 0.2, 8)
+    const lowerTorso = new THREE.Mesh(lowerTorsoGeo, kimonoMat)
+    lowerTorso.position.y = 0.38
+    group.add(lowerTorso)
+
+    // Obi (wide decorative belt)
+    const obiGeo = new THREE.CylinderGeometry(0.23, 0.24, 0.12, 12)
+    const obiMat = new THREE.MeshStandardMaterial({
+      color: COLORS.obi,
+      roughness: 0.5,
+    })
+    const obi = new THREE.Mesh(obiGeo, obiMat)
+    obi.position.y = 0.42
+    group.add(obi)
+
+    // Obi knot at back
+    const knotGeo = new THREE.BoxGeometry(0.12, 0.1, 0.08)
+    const knotMat = new THREE.MeshStandardMaterial({
+      color: COLORS.obiAccent,
       roughness: 0.6,
     })
-    const belt = new THREE.Mesh(beltGeo, beltMat)
-    belt.position.y = 0.45
-    group.add(belt)
+    const knot = new THREE.Mesh(knotGeo, knotMat)
+    knot.position.set(0, 0.42, -0.22)
+    group.add(knot)
+
+    // Obi ribbon
+    const ribbonGeo = new THREE.PlaneGeometry(0.08, 0.2)
+    const ribbonMat = new THREE.MeshStandardMaterial({
+      color: COLORS.obiAccent,
+      roughness: 0.7,
+      side: THREE.DoubleSide,
+    })
+    const ribbon = new THREE.Mesh(ribbonGeo, ribbonMat)
+    ribbon.position.set(0, 0.3, -0.22)
+    ribbon.rotation.x = 0.3
+    group.add(ribbon)
 
     // Katana on back
+    this.addKatana(group)
+
+    // Shoulder pads (kimono puffs)
+    const shoulderGeo = new THREE.SphereGeometry(0.1, 8, 8)
+
+    const leftShoulder = new THREE.Mesh(shoulderGeo, kimonoMat)
+    leftShoulder.position.set(-0.22, 0.72, 0)
+    leftShoulder.scale.set(1, 0.8, 0.9)
+    group.add(leftShoulder)
+
+    const rightShoulder = new THREE.Mesh(shoulderGeo, kimonoMat)
+    rightShoulder.position.set(0.22, 0.72, 0)
+    rightShoulder.scale.set(1, 0.8, 0.9)
+    group.add(rightShoulder)
+
+    return group
+  }
+
+  private addKatana(group: THREE.Group): void {
     const katanaGroup = new THREE.Group()
 
-    // Scabbard
-    const scabbardGeo = new THREE.CylinderGeometry(0.03, 0.025, 0.7, 6)
+    // Scabbard (saya)
+    const scabbardGeo = new THREE.CylinderGeometry(0.025, 0.02, 0.65, 8)
     const scabbardMat = new THREE.MeshStandardMaterial({
-      color: 0x222222,
+      color: COLORS.leather,
       roughness: 0.4,
     })
     const scabbard = new THREE.Mesh(scabbardGeo, scabbardMat)
     katanaGroup.add(scabbard)
 
-    // Handle wrap
-    const handleGeo = new THREE.CylinderGeometry(0.035, 0.035, 0.18, 6)
-    const handleMat = new THREE.MeshStandardMaterial({
-      color: 0x8b4513,
-      roughness: 0.8,
+    // Scabbard tip (kojiri)
+    const tipGeo = new THREE.SphereGeometry(0.025, 6, 6)
+    const goldMat = new THREE.MeshStandardMaterial({
+      color: COLORS.gold,
+      metalness: 0.8,
+      roughness: 0.2,
     })
-    const handle = new THREE.Mesh(handleGeo, handleMat)
-    handle.position.y = 0.4
-    katanaGroup.add(handle)
+    const tip = new THREE.Mesh(tipGeo, goldMat)
+    tip.position.y = -0.32
+    tip.scale.set(1, 0.5, 1)
+    katanaGroup.add(tip)
 
     // Guard (tsuba)
-    const guardGeo = new THREE.CylinderGeometry(0.06, 0.06, 0.015, 8)
-    const guardMat = new THREE.MeshStandardMaterial({
-      color: 0xc9a227,
-      metalness: 0.7,
-      roughness: 0.3,
-    })
-    const guard = new THREE.Mesh(guardGeo, guardMat)
-    guard.position.y = 0.3
+    const guardGeo = new THREE.CylinderGeometry(0.055, 0.055, 0.012, 12)
+    const guard = new THREE.Mesh(guardGeo, goldMat)
+    guard.position.y = 0.28
     katanaGroup.add(guard)
 
-    katanaGroup.position.set(0, 0.75, -0.2)
-    katanaGroup.rotation.x = 0.4
-    katanaGroup.rotation.z = 0.2
-    group.add(katanaGroup)
-
-    // Legs
-    const legGeo = new THREE.CylinderGeometry(0.08, 0.06, 0.35, 6)
-    const legMat = new THREE.MeshStandardMaterial({
-      color: 0x1a1a2e,
+    // Handle wrap (tsuka)
+    const handleGeo = new THREE.CylinderGeometry(0.028, 0.025, 0.16, 8)
+    const handleMat = new THREE.MeshStandardMaterial({
+      color: COLORS.wood,
       roughness: 0.9,
     })
+    const handle = new THREE.Mesh(handleGeo, handleMat)
+    handle.position.y = 0.38
+    katanaGroup.add(handle)
 
-    const leftLeg = new THREE.Mesh(legGeo, legMat)
-    leftLeg.position.set(-0.12, 0.18, 0)
-    group.add(leftLeg)
+    // Handle wrapping pattern (diamond pattern)
+    const wrapMat = new THREE.MeshStandardMaterial({
+      color: 0x1a1a1a,
+      roughness: 0.8,
+    })
+    for (let i = 0; i < 4; i++) {
+      const wrapGeo = new THREE.BoxGeometry(0.06, 0.02, 0.04)
+      const wrap = new THREE.Mesh(wrapGeo, wrapMat)
+      wrap.position.y = 0.32 + i * 0.04
+      wrap.rotation.y = (i % 2) * 0.5
+      katanaGroup.add(wrap)
+    }
 
-    const rightLeg = new THREE.Mesh(legGeo, legMat)
-    rightLeg.position.set(0.12, 0.18, 0)
-    group.add(rightLeg)
+    // Pommel (kashira)
+    const pommelGeo = new THREE.SphereGeometry(0.03, 8, 8)
+    const pommel = new THREE.Mesh(pommelGeo, goldMat)
+    pommel.position.y = 0.47
+    pommel.scale.set(1, 0.6, 1)
+    katanaGroup.add(pommel)
 
-    return group
+    // Position katana diagonally on back
+    katanaGroup.position.set(0.08, 0.65, -0.18)
+    katanaGroup.rotation.x = 0.5
+    katanaGroup.rotation.z = 0.35
+
+    group.add(katanaGroup)
   }
 
   private createArm(isLeft: boolean): THREE.Group {
     const group = new THREE.Group()
-    const x = isLeft ? -0.32 : 0.32
+    const x = isLeft ? -0.28 : 0.28
 
-    // Arm
-    const armGeo = new THREE.CylinderGeometry(0.06, 0.05, 0.35, 6)
-    const armMat = new THREE.MeshStandardMaterial({
-      color: 0x1a1a2e,
-      roughness: 0.9,
+    const kimonoMat = new THREE.MeshStandardMaterial({
+      color: COLORS.kimono,
+      roughness: 0.85,
     })
-    const arm = new THREE.Mesh(armGeo, armMat)
-    arm.position.y = -0.1
-    group.add(arm)
 
-    // Hand (skin color)
-    const handGeo = new THREE.SphereGeometry(0.06, 8, 8)
-    const handMat = new THREE.MeshStandardMaterial({
-      color: 0xc4956a,
+    const skinMat = new THREE.MeshStandardMaterial({
+      color: COLORS.skin,
       roughness: 0.8,
     })
-    const hand = new THREE.Mesh(handGeo, handMat)
-    hand.position.y = -0.3
+
+    // Upper arm (sleeve)
+    const upperArmGeo = new THREE.CylinderGeometry(0.07, 0.08, 0.18, 6)
+    const upperArm = new THREE.Mesh(upperArmGeo, kimonoMat)
+    upperArm.position.y = 0
+    group.add(upperArm)
+
+    // Sleeve opening showing skin
+    const skinShowGeo = new THREE.CylinderGeometry(0.055, 0.06, 0.05, 6)
+    const skinShow = new THREE.Mesh(skinShowGeo, skinMat)
+    skinShow.position.y = -0.12
+    group.add(skinShow)
+
+    // Lower arm (forearm - skin visible)
+    const forearmGeo = new THREE.CylinderGeometry(0.045, 0.05, 0.16, 6)
+    const forearm = new THREE.Mesh(forearmGeo, skinMat)
+    forearm.position.y = -0.22
+    group.add(forearm)
+
+    // Hand
+    const handGeo = new THREE.SphereGeometry(0.05, 8, 8)
+    const hand = new THREE.Mesh(handGeo, skinMat)
+    hand.position.y = -0.32
+    hand.scale.set(1, 1.2, 0.8)
     group.add(hand)
 
-    group.position.set(x, 0.7, 0)
+    // Fingers suggestion
+    const fingerGeo = new THREE.CylinderGeometry(0.015, 0.012, 0.06, 4)
+    for (let i = 0; i < 4; i++) {
+      const finger = new THREE.Mesh(fingerGeo, skinMat)
+      const angle = ((i - 1.5) / 3) * 0.6
+      finger.position.set(Math.sin(angle) * 0.03, -0.38, Math.cos(angle) * 0.02)
+      finger.rotation.x = 0.3
+      group.add(finger)
+    }
+
+    // Position arm at shoulder
+    group.position.set(x, 0.68, 0)
+
+    return group
+  }
+
+  private createLeg(isLeft: boolean): THREE.Group {
+    const group = new THREE.Group()
+    const x = isLeft ? -0.1 : 0.1
+
+    const kimonoMat = new THREE.MeshStandardMaterial({
+      color: COLORS.kimono,
+      roughness: 0.85,
+    })
+
+    // Hakama-style pants (wide at top, narrow at bottom)
+    const legGeo = new THREE.CylinderGeometry(0.06, 0.05, 0.35, 6)
+    const leg = new THREE.Mesh(legGeo, kimonoMat)
+    leg.position.y = 0.17
+    group.add(leg)
+
+    // Foot/sandal
+    const footGeo = new THREE.BoxGeometry(0.08, 0.03, 0.12)
+    const footMat = new THREE.MeshStandardMaterial({
+      color: COLORS.wood,
+      roughness: 0.9,
+    })
+    const foot = new THREE.Mesh(footGeo, footMat)
+    foot.position.set(0, 0.01, 0.02)
+    group.add(foot)
+
+    // Sandal strap
+    const strapGeo = new THREE.TorusGeometry(0.04, 0.008, 4, 8, Math.PI)
+    const strapMat = new THREE.MeshStandardMaterial({ color: 0x2a2a2a })
+    const strap = new THREE.Mesh(strapGeo, strapMat)
+    strap.position.set(0, 0.03, 0.04)
+    strap.rotation.x = Math.PI / 2
+    group.add(strap)
+
+    group.position.set(x, 0, 0)
+
     return group
   }
 
   private createStatusRing(): THREE.Mesh {
-    const geometry = new THREE.RingGeometry(0.5, 0.55, 32)
+    const geometry = new THREE.RingGeometry(0.45, 0.5, 32)
     const material = new THREE.MeshBasicMaterial({
       color: this.options.statusColor,
       side: THREE.DoubleSide,
@@ -316,8 +561,26 @@ export class AfroSamurai implements ICharacter {
     }
   }
 
+  private resetPose(): void {
+    // Reset head to base position
+    this.head.position.y = this.headBaseY
+    this.head.rotation.set(0, 0, 0)
+
+    // Reset body
+    this.body.position.y = 0
+    this.body.rotation.set(0, 0, 0)
+
+    // Reset arms
+    this.leftArm.rotation.set(0, 0, 0)
+    this.rightArm.rotation.set(0, 0, 0)
+
+    // Reset legs
+    this.leftLeg.rotation.set(0, 0, 0)
+    this.rightLeg.rotation.set(0, 0, 0)
+  }
+
   update(delta: number): void {
-    this.bobTime += delta
+    this.animTime += delta
     const parts = this.getCharacterParts()
 
     if (this.state === 'walking' && this.targetPosition) {
@@ -328,38 +591,59 @@ export class AfroSamurai implements ICharacter {
 
       if (distance > 0.1) {
         this.mesh.position.add(direction.multiplyScalar(this.moveSpeed * delta))
-        // Walking animation
-        this.head.position.y = Math.sin(this.bobTime * 12) * 0.03
-        this.leftArm.rotation.x = Math.sin(this.bobTime * 12) * 0.4
-        this.rightArm.rotation.x = -Math.sin(this.bobTime * 12) * 0.4
+
+        // Dynamic walking animation
+        const walkCycle = this.animTime * 10
+
+        // Head bob (relative to base position)
+        this.head.position.y = this.headBaseY + Math.sin(walkCycle) * 0.02
+
+        // Arm swing
+        this.leftArm.rotation.x = Math.sin(walkCycle) * 0.5
+        this.rightArm.rotation.x = -Math.sin(walkCycle) * 0.5
+
+        // Leg movement
+        this.leftLeg.rotation.x = -Math.sin(walkCycle) * 0.3
+        this.rightLeg.rotation.x = Math.sin(walkCycle) * 0.3
+
+        // Slight body lean forward
+        this.body.rotation.x = 0.05
+
         // Face movement direction
         const angle = Math.atan2(direction.x, direction.z)
         this.mesh.rotation.y = angle
       } else {
         this.mesh.position.copy(this.targetPosition)
         this.targetPosition = null
+        this.resetPose()
         this.setState('idle')
-        this.head.position.y = 0
-        this.leftArm.rotation.x = 0
-        this.rightArm.rotation.x = 0
       }
     } else if (this.state === 'idle') {
-      // Subtle breathing
-      const breathe = Math.sin(this.bobTime * 2) * 0.015
+      // Subtle breathing and stance
+      const breathe = Math.sin(this.animTime * 1.5) * 0.01
       this.body.position.y = breathe
-      this.head.position.y = breathe * 0.5
+      this.head.position.y = this.headBaseY + breathe * 0.5
+
+      // Slight arm sway
+      this.leftArm.rotation.z = Math.sin(this.animTime * 0.8) * 0.02 + 0.1
+      this.rightArm.rotation.z = -Math.sin(this.animTime * 0.8) * 0.02 - 0.1
 
       // Update idle behaviors
       this.idleBehaviorManager.update(parts, delta)
     } else if (this.state === 'working') {
-      this.workTime += delta
       // Update working behaviors
       this.workingBehaviorManager.update(parts, delta)
     } else if (this.state === 'thinking') {
-      this.thinkTime += delta
-      // Head tilted, contemplating
-      this.head.rotation.z = Math.sin(this.thinkTime * 0.5) * 0.1
-      this.head.rotation.x = -0.15
+      // Samurai contemplation pose
+      const thinkCycle = this.animTime * 0.5
+      this.head.rotation.z = Math.sin(thinkCycle) * 0.08
+      this.head.rotation.x = -0.1
+
+      // Arms crossed or relaxed
+      this.leftArm.rotation.x = -0.3
+      this.leftArm.rotation.z = 0.4
+      this.rightArm.rotation.x = -0.3
+      this.rightArm.rotation.z = -0.4
     }
   }
 
@@ -386,20 +670,23 @@ export class AfroSamurai implements ICharacter {
       this.workingBehaviorManager.stop(parts)
     }
 
+    // Reset pose when changing states (except to walking)
+    if (state !== 'walking') {
+      this.resetPose()
+    }
+
     this.state = state
 
     if (state === 'working') {
       this.workingBehaviorManager.start(this.currentStation, parts)
-    } else if (state === 'idle') {
-      this.head.rotation.set(0, 0, 0)
     }
 
     // Update status ring color
     const colors = {
-      idle: 0x4ade80,    // green
+      idle: 0x4ade80, // green
       walking: 0x60a5fa, // blue
       working: 0xfb923c, // orange
-      thinking: 0xa78bfa // purple
+      thinking: 0xa78bfa, // purple
     }
     const ring = this.statusRing.material as THREE.MeshBasicMaterial
     ring.color.setHex(colors[state])
