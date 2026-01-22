@@ -1,0 +1,237 @@
+/**
+ * Plugin System Styles
+ */
+
+/* Plugin Panel */
+.plugin-panel {
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(100, 116, 139, 0.3);
+  border-radius: 8px;
+  padding: 8px;
+  margin-top: 8px;
+}
+
+.plugin-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid rgba(100, 116, 139, 0.2);
+}
+
+.plugin-panel-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(148, 163, 184, 0.8);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Plugin List */
+.plugin-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.plugin-item {
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px solid rgba(100, 116, 139, 0.2);
+  border-radius: 6px;
+  overflow: hidden;
+  transition: all 0.15s ease;
+}
+
+.plugin-item.disabled {
+  opacity: 0.5;
+}
+
+.plugin-item.enabled {
+  border-color: rgba(34, 197, 94, 0.3);
+}
+
+.plugin-item-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+
+.plugin-item-header:hover {
+  background: rgba(51, 65, 85, 0.5);
+}
+
+.plugin-icon {
+  font-size: 14px;
+  width: 20px;
+  text-align: center;
+}
+
+.plugin-name {
+  flex: 1;
+  font-size: 12px;
+  color: #e2e8f0;
+}
+
+.plugin-toggle {
+  background: none;
+  border: 1px solid rgba(100, 116, 139, 0.3);
+  border-radius: 4px;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 10px;
+  color: #94a3b8;
+  transition: all 0.15s ease;
+}
+
+.plugin-toggle:hover {
+  background: rgba(51, 65, 85, 0.8);
+  border-color: rgba(100, 116, 139, 0.5);
+}
+
+.plugin-item.enabled .plugin-toggle {
+  background: rgba(34, 197, 94, 0.2);
+  border-color: rgba(34, 197, 94, 0.5);
+  color: #22c55e;
+}
+
+/* Plugin Content */
+.plugin-content {
+  padding: 8px;
+  border-top: 1px solid rgba(100, 116, 139, 0.15);
+  background: rgba(15, 23, 42, 0.5);
+}
+
+/* Model Selector Plugin */
+.model-selector {
+  display: flex;
+  align-items: center;
+}
+
+.model-select {
+  width: 100%;
+  padding: 6px 8px;
+  background: rgba(30, 41, 59, 0.8);
+  border: 1px solid rgba(100, 116, 139, 0.3);
+  border-radius: 4px;
+  color: #e2e8f0;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.model-select:hover {
+  border-color: rgba(100, 116, 139, 0.5);
+}
+
+.model-select:focus {
+  outline: none;
+  border-color: #3b82f6;
+}
+
+.model-select option {
+  background: #1e293b;
+  color: #e2e8f0;
+}
+
+/* Thinking Toggle Plugin */
+.thinking-toggle {
+  display: flex;
+  align-items: center;
+}
+
+.thinking-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.thinking-checkbox {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: #8b5cf6;
+}
+
+.thinking-text {
+  transition: color 0.15s ease;
+}
+
+.thinking-checkbox:checked + .thinking-text {
+  color: #a78bfa;
+}
+
+/* MCP List Plugin */
+.mcp-empty {
+  font-size: 11px;
+  color: #64748b;
+  text-align: center;
+  padding: 8px;
+  font-style: italic;
+}
+
+.mcp-server-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.mcp-server-item {
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px solid rgba(100, 116, 139, 0.2);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.mcp-server-item:hover {
+  background: rgba(51, 65, 85, 0.6);
+  border-color: rgba(100, 116, 139, 0.4);
+}
+
+.mcp-server-item.selected {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+.mcp-server-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+}
+
+.mcp-server-icon {
+  font-size: 12px;
+}
+
+.mcp-server-name {
+  flex: 1;
+  font-size: 11px;
+  color: #e2e8f0;
+  font-family: monospace;
+}
+
+.mcp-tool-count {
+  font-size: 10px;
+  color: #64748b;
+}
+
+.mcp-stats {
+  font-size: 10px;
+  color: #64748b;
+  text-align: center;
+  padding: 6px 0 2px;
+  border-top: 1px solid rgba(100, 116, 139, 0.15);
+  margin-top: 6px;
+}
