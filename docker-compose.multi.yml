@@ -1,0 +1,87 @@
+# Vibecraft Multi-Instance Docker Compose
+#
+# For running multiple Claude worker instances alongside the main Vibecraft server.
+# Each worker can run a separate Claude session.
+#
+# Usage:
+#   docker-compose -f docker-compose.multi.yml up -d
+#   docker-compose -f docker-compose.multi.yml up -d --scale claude-worker=5
+#
+# Environment variables:
+#   CLAUDE_INSTANCES - Number of Claude worker containers (default: 3)
+
+version: '3.8'
+
+services:
+  # ==========================================================================
+  # Vibecraft Hub (Main Server)
+  # ==========================================================================
+  vibecraft-hub:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: vibecraft-hub
+    ports:
+      - "${VIBECRAFT_PORT:-4003}:4003"
+    volumes:
+      # Shared data volume for all instances
+      - vibecraft-shared:/data
+      # Optional: Mount host config for hooks
+      - "${HOME}/.vibecraft/hooks:/app/hooks:ro"
+    environment:
+      - NODE_ENV=production
+      - VIBECRAFT_PORT=4003
+      - VIBECRAFT_DATA_DIR=/data
+      - VIBECRAFT_MODE=hub
+      - VIBECRAFT_DEBUG=${VIBECRAFT_DEBUG:-false}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:4003/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+    networks:
+      - vibecraft-net
+
+  # ==========================================================================
+  # Claude Worker Template
+  # ==========================================================================
+  # Workers connect back to the hub and can run Claude instances
+  # Scale with: --scale claude-worker=N
+  claude-worker:
+    image: node:20-alpine
+    volumes:
+      - vibecraft-shared:/data:rw
+    environment:
+      - VIBECRAFT_HUB_URL=http://vibecraft-hub:4003
+      - VIBECRAFT_DATA_DIR=/data
+      - NODE_ENV=production
+    depends_on:
+      vibecraft-hub:
+        condition: service_healthy
+    networks:
+      - vibecraft-net
+    deploy:
+      replicas: ${CLAUDE_INSTANCES:-3}
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    # Workers just need to exist - actual Claude orchestration is done via API
+    command: ["sh", "-c", "echo 'Worker ready' && sleep infinity"]
+    restart: unless-stopped
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  vibecraft-net:
+    driver: bridge
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  vibecraft-shared:
+    driver: local

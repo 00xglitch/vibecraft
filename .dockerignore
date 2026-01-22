@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+
+# Build output (we rebuild in Docker)
+dist/
+
+# Development files
+.git/
+.gitignore
+.env
+.env.*
+!.env.example
+
+# IDE/Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Testing
+test-results/
+playwright-report/
+coverage/
+*.test.ts
+tests/
+
+# Documentation (not needed in container)
+docs/
+*.md
+!README.md
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local development
+.serena/
+*.log
+*.local
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Build artifacts we don't need
+*.map
