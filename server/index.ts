@@ -9,6 +9,9 @@
  * 5. Proxies voice input to Deepgram for transcription
  */
 
+// Load environment variables from .env file
+import 'dotenv/config'
+
 import { createServer, IncomingMessage, ServerResponse } from 'http'
 import { WebSocketServer, WebSocket, RawData } from 'ws'
 import { watch } from 'chokidar'

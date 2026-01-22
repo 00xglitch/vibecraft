@@ -39,4 +39,9 @@ export * from './AnimationTypes'
 export { IDLE_BEHAVIORS, IdleBehaviorManager } from './IdleBehaviors'
 
 // Working behaviors
-export { STATION_ANIMATIONS, WorkingBehaviorManager } from './WorkingBehaviors'
+export {
+  STATION_ANIMATIONS,
+  MCP_CATEGORY_ANIMATIONS,
+  getMCPAnimation,
+  WorkingBehaviorManager
+} from './WorkingBehaviors'

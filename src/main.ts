@@ -12,6 +12,12 @@ import { WorkshopScene, ZONE_COLORS, type Zone, type CameraMode } from './scene/
 // import { Claude } from './entities/Claude'      // Original simple character
 import { Claude } from './entities/ClaudeMon'      // Robot buddy character (used for both Claude and OpenCode)
 import { Flower } from './entities/Flower'          // Flower head character
+import { AfroSamurai } from './entities/AfroSamurai'  // Afro Samurai character
+import { Pacman } from './entities/Pacman'            // Classic Pacman character
+import { Rick } from './entities/Rick'                // Rick Sanchez character
+import { Morty } from './entities/Morty'              // Morty Smith character
+import { Ninja } from './entities/Ninja'              // Stealthy ninja character
+import { Wizard } from './entities/Wizard'            // Mystical wizard character
 import type { ICharacter, CharacterOptions } from './entities/ICharacter'
 import { SubagentManager } from './entities/SubagentManager'
 import { EventClient } from './events/EventClient'
@@ -64,6 +70,7 @@ import { fetchOpenCodeProviders } from './ui/OpenCodeProviderSelect'
 import { checkForUpdates } from './ui/VersionChecker'
 import { drawMode } from './ui/DrawMode'
 import { setupTextLabelModal, showTextLabelModal } from './ui/TextLabelModal'
+import { smartSuggestions } from './ui/SmartSuggestions'
 import { createSessionAPI, type SessionAPI } from './api'
 import { replayController, ReplaySceneManager, type SceneSnapshot } from './replay'
 import { setupReplayControls, type ReplayControls } from './ui/ReplayControls'
@@ -114,14 +121,63 @@ function getSelectedCharacterType(): string {
 }
 
 /**
+ * Character theme colors for robot variations
+ */
+const CHARACTER_THEMES = {
+  robot: {
+    color: 0x2a3a4a,     // Dark blue-gray metal (default)
+    scale: 1,
+  },
+  rick: {
+    color: 0x7dd3fc,     // Light blue-cyan (Rick's hair/skin tone)
+    scale: 1.1,          // Rick is slightly taller
+  },
+  morty: {
+    color: 0xfde047,     // Yellow (Morty's shirt)
+    scale: 0.85,         // Morty is smaller
+  },
+  ninja: {
+    color: 0x1a1a2e,     // Dark ninja outfit
+    scale: 0.95,
+  },
+  wizard: {
+    color: 0x6366f1,     // Purple wizard robe
+    scale: 1.05,
+  },
+}
+
+/**
  * Create the appropriate character based on settings
  */
 function createCharacter(scene: WorkshopScene, options: CharacterOptions): ICharacter {
   const characterType = getSelectedCharacterType()
-  if (characterType === 'flower') {
-    return new Flower(scene, options)
+
+  // Special character classes (unique designs, not robot variants)
+  switch (characterType) {
+    case 'flower':
+      return new Flower(scene, options)
+    case 'afrosamurai':
+      return new AfroSamurai(scene, options)
+    case 'pacman':
+      return new Pacman(scene, options)
+    case 'rick':
+      return new Rick(scene, options)
+    case 'morty':
+      return new Morty(scene, options)
+    case 'ninja':
+      return new Ninja(scene, options)
+    case 'wizard':
+      return new Wizard(scene, options)
   }
-  return new Claude(scene, options)
+
+  // Robot variants with theme colors
+  const theme = CHARACTER_THEMES[characterType as keyof typeof CHARACTER_THEMES] || CHARACTER_THEMES.robot
+  const themedOptions = {
+    ...options,
+    color: options.color ?? theme.color,
+    scale: (options.scale ?? 1) * theme.scale,
+  }
+  return new Claude(scene, themedOptions)
 }
 
 // ============================================================================
@@ -165,6 +221,9 @@ interface AppState {
   replaySceneManager: ReplaySceneManager | null  // Manages scene state during replay
   replayControls: ReplayControls | null  // UI controls for replay
   replaySnapshot: SceneSnapshot | null  // Snapshot of scene state before replay
+  // Sidebar state
+  showArchivedSessions: boolean  // Whether to show archived sessions
+  draggingSessionId: string | null  // Session being dragged for reorder
 }
 
 const state: AppState = {
@@ -191,10 +250,23 @@ const state: AppState = {
   replaySceneManager: null,
   replayControls: null,
   replaySnapshot: null,
+  // Sidebar state
+  showArchivedSessions: false,
+  draggingSessionId: null,
 }
 
 // Expose for console testing (can remove in production)
 ;(window as any).state = state
+
+// Track zone creation times to prevent premature orphan cleanup
+// Zones created within the grace period won't be deleted even if not in session list
+const zoneCreationTimes = new Map<string, number>()
+const ZONE_GRACE_PERIOD_MS = 10000 // 10 seconds grace period after creation
+
+// Track when zones first became orphaned (not in session list)
+// Zones are only deleted if orphaned for longer than ORPHAN_TIMEOUT_MS
+const zoneOrphanedTimes = new Map<string, number>()
+const ORPHAN_TIMEOUT_MS = 120000 // 2 minutes - zones stay visible even if session is gone
 
 // Track pending zone hints for direction-aware placement
 // Maps managed session name → click position (used when zone is created)
@@ -245,13 +317,83 @@ function renderManagedSessions(): void {
     allItem.classList.toggle('active', state.selectedManagedSession === null)
   }
 
-  state.managedSessions.forEach((session, index) => {
+  // Filter: hide archived unless showArchivedSessions is true
+  const visibleSessions = state.managedSessions.filter(s =>
+    !s.archived || state.showArchivedSessions
+  )
+
+  // Count archived for header
+  const archivedCount = state.managedSessions.filter(s => s.archived).length
+
+  // Sort: pinned first, then by sortOrder (lower first), then by createdAt (oldest first)
+  const sortedSessions = [...visibleSessions].sort((a, b) => {
+    // Pinned items first
+    if (a.pinned && !b.pinned) return -1
+    if (!a.pinned && b.pinned) return 1
+    // Then by sortOrder (default to Infinity for items without sortOrder)
+    const orderA = a.sortOrder ?? Infinity
+    const orderB = b.sortOrder ?? Infinity
+    if (orderA !== orderB) return orderA - orderB
+    // Finally by createdAt (oldest first, as newer sessions should be at bottom)
+    return a.createdAt - b.createdAt
+  })
+
+  // Add "Show Archived" toggle if there are archived sessions
+  if (archivedCount > 0) {
+    const toggleEl = document.createElement('div')
+    toggleEl.className = 'session-archive-toggle'
+    const toggleBtn = document.createElement('button')
+    toggleBtn.className = 'archive-toggle-btn'
+    toggleBtn.textContent = `${state.showArchivedSessions ? '📦 Hide Archived' : '📦 Show Archived'} (${archivedCount})`
+    toggleBtn.addEventListener('click', () => {
+      state.showArchivedSessions = !state.showArchivedSessions
+      renderManagedSessions()
+    })
+    toggleEl.appendChild(toggleBtn)
+    container.appendChild(toggleEl)
+  }
+
+  sortedSessions.forEach((session, index) => {
     const el = document.createElement('div')
     el.className = 'session-item'
     el.dataset.sessionId = session.id  // For targeted DOM updates (e.g., token updates)
     if (session.id === state.selectedManagedSession) {
       el.classList.add('active')
     }
+    if (session.pinned) {
+      el.classList.add('pinned')
+    }
+    if (session.archived) {
+      el.classList.add('archived')
+    }
+
+    // Enable drag for reordering
+    el.draggable = true
+    el.addEventListener('dragstart', (e) => {
+      state.draggingSessionId = session.id
+      el.classList.add('dragging')
+      e.dataTransfer?.setData('text/plain', session.id)
+    })
+    el.addEventListener('dragend', () => {
+      state.draggingSessionId = null
+      el.classList.remove('dragging')
+    })
+    el.addEventListener('dragover', (e) => {
+      e.preventDefault()
+      if (state.draggingSessionId && state.draggingSessionId !== session.id) {
+        el.classList.add('drag-over')
+      }
+    })
+    el.addEventListener('dragleave', () => {
+      el.classList.remove('drag-over')
+    })
+    el.addEventListener('drop', (e) => {
+      e.preventDefault()
+      el.classList.remove('drag-over')
+      if (state.draggingSessionId && state.draggingSessionId !== session.id) {
+        reorderSession(state.draggingSessionId, session.id)
+      }
+    })
 
     // Check if session needs attention
     const needsAttention = state.attentionSystem?.needsAttention(session.id) ?? false
@@ -312,12 +454,15 @@ function renderManagedSessions(): void {
     ].filter(Boolean)
     el.title = tooltipParts.join('\n')
 
+    // Build pinned indicator
+    const pinnedIndicator = session.pinned ? '<span class="session-pin-indicator">📌</span>' : ''
+
     el.innerHTML = `
       ${hotkey ? `<div class="session-hotkey">${hotkey}</div>` : ''}
       <div class="session-status ${statusClass}"></div>
       <div class="session-info">
         <div class="session-name">
-          ${escapeHtml(session.name)}
+          ${pinnedIndicator}${escapeHtml(session.name)}
           ${isImplicit ? '<span class="session-badge external" title="External Claude session (no tmux control)">ext</span>' : ''}
         </div>
         <div class="${detailClass}">${detail}${!needsAttention && session.status !== 'offline' && lastActive ? ` · ${lastActive}` : ''}</div>
@@ -325,6 +470,8 @@ function renderManagedSessions(): void {
         ${truncatedPrompt ? `<div class="session-prompt">💬 ${escapeHtml(truncatedPrompt)}</div>` : ''}
       </div>
       <div class="session-actions">
+        <button class="pin-btn" title="${session.pinned ? 'Unpin' : 'Pin to top'}">${session.pinned ? '📍' : '📌'}</button>
+        <button class="archive-btn" title="${session.archived ? 'Unarchive' : 'Archive'}">${session.archived ? '📤' : '📦'}</button>
         ${session.status === 'offline' && !isImplicit ? `<button class="restart-btn" title="Restart session">🔄</button>` : ''}
         ${!isImplicit ? `<button class="rename-btn" title="Rename">✏️</button>` : ''}
         <button class="delete-btn" title="${isImplicit ? 'Remove from list' : 'Delete'}">🗑️</button>
@@ -362,6 +509,18 @@ function renderManagedSessions(): void {
     el.querySelector('.restart-btn')?.addEventListener('click', (e) => {
       e.stopPropagation()
       restartManagedSession(session.id, session.name)
+    })
+
+    // Pin button
+    el.querySelector('.pin-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation()
+      togglePinSession(session.id, !session.pinned)
+    })
+
+    // Archive button
+    el.querySelector('.archive-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation()
+      toggleArchiveSession(session.id, !session.archived)
     })
 
     container.appendChild(el)
@@ -575,6 +734,59 @@ async function sendPromptToManagedSession(prompt: string, sessionId?: string): P
   return sessionAPI.sendPrompt(targetSession, prompt)
 }
 
+/**
+ * Toggle pin status for a session
+ */
+async function togglePinSession(sessionId: string, pinned: boolean): Promise<void> {
+  const data = await sessionAPI.updateSession(sessionId, { pinned })
+  if (!data.ok) {
+    console.error('Failed to pin/unpin session:', data.error)
+  }
+  // Update will be broadcast via WebSocket
+}
+
+/**
+ * Toggle archive status for a session
+ */
+async function toggleArchiveSession(sessionId: string, archived: boolean): Promise<void> {
+  const data = await sessionAPI.updateSession(sessionId, { archived })
+  if (!data.ok) {
+    console.error('Failed to archive/unarchive session:', data.error)
+  }
+  // If archiving the selected session, clear selection
+  if (archived && state.selectedManagedSession === sessionId) {
+    selectManagedSession(null)
+  }
+  // Update will be broadcast via WebSocket
+}
+
+/**
+ * Reorder a session by placing it before another session
+ */
+async function reorderSession(draggedId: string, targetId: string): Promise<void> {
+  // Find the target session's sortOrder
+  const targetSession = state.managedSessions.find(s => s.id === targetId)
+  const draggedSession = state.managedSessions.find(s => s.id === draggedId)
+  if (!targetSession || !draggedSession) return
+
+  // Calculate new sortOrder: place dragged session just before target
+  // Simple approach: give it a sortOrder slightly less than target
+  const targetOrder = targetSession.sortOrder ?? Infinity
+  const newOrder = targetOrder - 0.001
+
+  // If they're in different pin groups, match the pin status too
+  const updates: { sortOrder: number; pinned?: boolean } = { sortOrder: newOrder }
+  if (targetSession.pinned !== draggedSession.pinned) {
+    updates.pinned = targetSession.pinned
+  }
+
+  const data = await sessionAPI.updateSession(draggedId, updates)
+  if (!data.ok) {
+    console.error('Failed to reorder session:', data.error)
+  }
+  // Update will be broadcast via WebSocket
+}
+
 // ============================================================================
 // Attention System Helpers
 // ============================================================================
@@ -750,13 +962,17 @@ function setupManagedSessions(): void {
       // Create OpenCode session
       createOpenCodeSession(name, cwd, hintPosition)
     } else {
-      // Read flag checkboxes
+      // Read flag checkboxes and selects
+      const modelSelect = document.getElementById('session-opt-model') as HTMLSelectElement
+      const thinkingCheck = document.getElementById('session-opt-thinking') as HTMLInputElement
       const continueCheck = document.getElementById('session-opt-continue') as HTMLInputElement
       const skipPermsCheck = document.getElementById('session-opt-skip-perms') as HTMLInputElement
       const chromeCheck = document.getElementById('session-opt-chrome') as HTMLInputElement
       const worktreeCheck = document.getElementById('session-opt-worktree') as HTMLInputElement
 
       const flags: SessionFlags = {
+        model: modelSelect?.value || undefined,
+        thinking: thinkingCheck?.checked ?? false,
         continue: continueCheck?.checked ?? true,
         skipPermissions: skipPermsCheck?.checked ?? true,
         chrome: chromeCheck?.checked ?? false,
@@ -1562,6 +1778,9 @@ function getOrCreateSession(sessionId: string, eventCwd?: string): SessionState 
   // Create zone in the 3D scene with direction-aware placement
   const zone = state.scene.createZone(sessionId, { hintPosition })
 
+  // Track zone creation time for grace period protection
+  zoneCreationTimes.set(sessionId, Date.now())
+
   // Clean up pending zone now that real zone exists
   if (linkedManagedSession) {
     const pendingZoneId = pendingZonesToCleanup.get(linkedManagedSession.name)
@@ -2084,6 +2303,11 @@ function handleEvent(event: ClaudeEvent, isHistory = false) {
   }
   eventBus.emit(event.type as EventType, event as any, eventContext)
 
+  // Process event for smart suggestions (skip history events to avoid stale suggestions)
+  if (!isHistory) {
+    smartSuggestions.processEvent(event)
+  }
+
   // If no session (unlinked), still add to feed/timeline with default color but skip 3D updates
   const eventColor = session?.color ?? 0x888888
   state.timelineManager?.add(event, eventColor)
@@ -2286,6 +2510,17 @@ function setupPromptForm() {
 
   // Setup slash command autocomplete
   setupSlashCommands(input)
+
+  // Setup smart suggestions
+  smartSuggestions.init('smart-suggestions', (prompt) => {
+    input.value = prompt
+    autoExpand()
+    input.focus()
+    // Optional: auto-submit if suggestion is a simple action
+    if (prompt.length < 20) {
+      form.requestSubmit()
+    }
+  })
 
   // Keyboard handling: Enter to send, Up/Down for history
   // Note: Skip if slash commands already handled the event
@@ -3350,6 +3585,9 @@ function init() {
            }
            const zone = state.scene.createZone(session.claudeSessionId, { hintPosition })
 
+           // Track zone creation time for grace period protection
+           zoneCreationTimes.set(session.claudeSessionId, Date.now())
+
            // Play zone creation sound
            if (state.soundEnabled) {
              soundManager.play('zone_create', { zoneId: session.claudeSessionId })
@@ -3414,6 +3652,9 @@ function init() {
            }
            const zone = state.scene.createZone(zoneId, { hintPosition })
 
+           // Track zone creation time for grace period protection
+           zoneCreationTimes.set(zoneId, Date.now())
+
            // Play zone creation sound
            if (state.soundEnabled) {
              soundManager.play('zone_create', { zoneId })
@@ -3463,16 +3704,53 @@ function init() {
      }
 
     // Clean up orphaned zones (zones not linked to any managed session)
+    // Uses a multi-stage approach to prevent zones from disappearing prematurely:
+    // 1. Recently created zones (< 10s) are never deleted
+    // 2. Zones must be orphaned for 2+ minutes before deletion
+    // 3. If a zone becomes linked again, its orphan timer resets
     if (state.scene) {
       const activeZoneIds = new Set(
         sessions.map(s => s.sessionType === 'claude' ? s.claudeSessionId : s.id).filter(Boolean)
       )
       const zonesToDelete: string[] = []
+      const now = Date.now()
+
       for (const [zoneId] of state.scene.zones) {
-        if (!activeZoneIds.has(zoneId)) {
-          zonesToDelete.push(zoneId)
+        if (activeZoneIds.has(zoneId)) {
+          // Zone is active - clear any orphan tracking
+          if (zoneOrphanedTimes.has(zoneId)) {
+            console.log(`Zone ${zoneId.slice(0, 8)} is no longer orphaned`)
+            zoneOrphanedTimes.delete(zoneId)
+          }
+          continue
         }
+
+        // Zone is not in active list - check if it should be deleted
+
+        // Check 1: Don't delete recently created zones
+        const createdAt = zoneCreationTimes.get(zoneId)
+        if (createdAt && (now - createdAt) < ZONE_GRACE_PERIOD_MS) {
+          continue
+        }
+
+        // Check 2: Track when zone first became orphaned
+        if (!zoneOrphanedTimes.has(zoneId)) {
+          zoneOrphanedTimes.set(zoneId, now)
+          console.log(`Zone ${zoneId.slice(0, 8)} became orphaned - will delete in ${ORPHAN_TIMEOUT_MS / 1000}s if still orphaned`)
+          continue
+        }
+
+        // Check 3: Only delete if orphaned for long enough
+        const orphanedAt = zoneOrphanedTimes.get(zoneId)!
+        if ((now - orphanedAt) < ORPHAN_TIMEOUT_MS) {
+          // Not orphaned long enough yet
+          continue
+        }
+
+        // Zone has been orphaned for 2+ minutes - safe to delete
+        zonesToDelete.push(zoneId)
       }
+
       for (const zoneId of zonesToDelete) {
         // Clean up session state (Claude entity, subagents)
         const sessionState = state.sessions.get(zoneId)
@@ -3488,7 +3766,11 @@ function init() {
         // Delete the 3D zone
         state.scene.deleteZone(zoneId)
 
-        console.log(`Cleaned up orphaned zone: ${zoneId.slice(0, 8)}`)
+        // Clean up tracking
+        zoneCreationTimes.delete(zoneId)
+        zoneOrphanedTimes.delete(zoneId)
+
+        console.log(`Cleaned up orphaned zone: ${zoneId.slice(0, 8)} (orphaned for ${ORPHAN_TIMEOUT_MS / 1000}s)`)
       }
     }
 

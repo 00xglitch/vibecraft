@@ -33,6 +33,24 @@ export default defineConfig({
       '/opencode': {
         target: `http://localhost:${serverPort}`,
       },
+      '/health': {
+        target: `http://localhost:${serverPort}`,
+      },
+      '/tiles': {
+        target: `http://localhost:${serverPort}`,
+      },
+      '/stats': {
+        target: `http://localhost:${serverPort}`,
+      },
+      '/event': {
+        target: `http://localhost:${serverPort}`,
+      },
+      '/prompt': {
+        target: `http://localhost:${serverPort}`,
+      },
+      '/voice': {
+        target: `http://localhost:${serverPort}`,
+      },
     },
   },
   build: {
