@@ -46,11 +46,13 @@ main.ts continues       → UI updates (DOM), special cases
 ```
 
 **Files:**
+
 - `src/events/EventBus.ts` - Core event dispatch with typed handlers
 - `src/events/handlers/` - Handler modules (6 files)
 - `src/events/handlers/index.ts` - Barrel export with `registerAllHandlers()`
 
 **Adding a new event handler:**
+
 ```typescript
 // In src/events/handlers/myHandlers.ts
 import { eventBus } from '../EventBus'
@@ -72,6 +74,7 @@ export function registerAllHandlers(): void {
 ```
 
 **EventContext** provides access to:
+
 - `scene` - WorkshopScene for 3D updates
 - `feedManager` - Activity feed
 - `timelineManager` - Timeline strip
@@ -83,6 +86,7 @@ export function registerAllHandlers(): void {
 ## Key Files
 
 ### `shared/types.ts`
+
 Defines all TypeScript types used across server and client:
 
 - `ClaudeEvent` - Union type of all event types (pre_tool_use, post_tool_use, stop, etc.)
@@ -97,27 +101,32 @@ Defines all TypeScript types used across server and client:
 Vibecraft uses hooks to capture Claude Code events. **The Rust hook is preferred** (7-10x faster) but falls back to the bash script on unsupported platforms.
 
 **Rust hook** (`hooks/rust/`) - Compiled binary, ~3.5ms latency:
+
 - Source: `hooks/rust/src/main.rs`
 - Installed to: `~/.vibecraft/hooks/vibecraft-hook` (no extension)
 - Binaries: `hooks/bin/vibecraft-hook-{darwin-arm64,darwin-x64,darwin-universal,linux-x64}`
 - Dependencies: curl (optional, for HTTP notifications)
 
 **Bash hook** (`hooks/vibecraft-hook.sh`) - Fallback for unsupported platforms:
+
 - Installed to: `~/.vibecraft/hooks/vibecraft-hook.sh`
 - Dependencies: jq (required), curl (required)
 
 **Both hooks do the same thing:**
+
 - Read JSON from stdin (Claude Code pipes hook data)
 - Transform to Vibecraft event format
 - Write to `~/.vibecraft/data/events.jsonl` (append-only log)
 - POST to server for real-time updates
 
 **Bash hook cross-platform support:**
+
 - Adds common tool paths to PATH (`/opt/homebrew/bin`, `/usr/local/bin`, etc.)
 - Uses `find_tool()` function to locate `jq` (required) and `curl` (optional)
 - Handles macOS timestamp differences (no `date +%N`)
 
 **Dependencies:**
+
 - `jq` - **Required**. Used to parse and transform JSON events.
 - `curl` - **Optional**. Used for real-time server notifications. If missing, events are still written to JSONL (server watches file for changes via chokidar).
 
@@ -128,6 +137,7 @@ Vibecraft uses hooks to capture Claude Code events. **The Rust hook is preferred
 ### Setup Process (`npx vibecraft setup`)
 
 The setup command:
+
 1. Installs Rust binary to `~/.vibecraft/hooks/vibecraft-hook` (or bash script as fallback)
 2. Creates `~/.vibecraft/data/` directory
 3. Configures all 8 hooks in `~/.claude/settings.json`:
@@ -138,6 +148,7 @@ The setup command:
 **Why ~/.vibecraft/hooks/?** The hook path must be stable. If hooks pointed to the npm package location, they'd break when the package updates or npx cache clears.
 
 ### `server/index.ts`
+
 Node.js WebSocket server:
 
 - Watches `events.jsonl` with chokidar for file-based events
@@ -147,12 +158,15 @@ Node.js WebSocket server:
 - HTTP endpoints: `/health`, `/stats`, `/prompt`
 
 **tmux integration**: POST to `/prompt` with `{prompt: "text", send: true}` runs:
+
 ```bash
 tmux send-keys -t claude -l 'text' && sleep 0.1 && tmux send-keys -t claude Enter
 ```
+
 The `-l` flag sends text literally, then Enter is sent separately after a delay.
 
 ### `src/scene/WorkshopScene.ts`
+
 Three.js 3D scene setup:
 
 - **World hex grid**: Subtle hex grid overlay across the entire floor, establishing hexagons as the "base reality" of the world
@@ -170,6 +184,7 @@ Three.js 3D scene setup:
 **Zone positioning**: Uses axial hex coordinates converted to cartesian. `indexToHexCoord()` maps linear index to spiral position.
 
 ### `src/entities/ClaudeMon.ts`
+
 The main animated character (robot buddy). `Claude.ts` contains the legacy simpler character.
 
 ClaudeMon features:
@@ -190,26 +205,28 @@ ClaudeMon features:
 Modular animation architecture for character behaviors:
 
 **Files:**
+
 - `AnimationTypes.ts` - Shared interfaces, easing functions, utilities
 - `IdleBehaviors.ts` - Random idle animations (fidgets, dances, emotes)
 - `WorkingBehaviors.ts` - Station-specific work animations
 - `animations/index.ts` - Barrel export for external imports
 
 **Adding a new idle animation:**
+
 ```typescript
 // In IdleBehaviors.ts
 const myAnimation: IdleBehavior = {
   name: 'myAnimation',
-  duration: 2,           // seconds
-  weight: 5,             // higher = more likely to be picked
+  duration: 2, // seconds
+  weight: 5, // higher = more likely to be picked
   categories: ['idle', 'emote'],
   update: (parts, progress, deltaTime) => {
     // progress goes 0→1 over duration
     parts.head.rotation.y = Math.sin(progress * Math.PI * 2) * 0.2
   },
   reset: (parts) => {
-    parts.head.rotation.y = 0  // Always reset to avoid stuck poses!
-  }
+    parts.head.rotation.y = 0 // Always reset to avoid stuck poses!
+  },
 }
 
 // Add to registry
@@ -220,14 +237,19 @@ export const IDLE_BEHAVIORS: IdleBehavior[] = [
 ```
 
 **Adding a new station animation:**
+
 ```typescript
 // In WorkingBehaviors.ts
 const myStationAnim: WorkingBehavior = {
   name: 'myStationAnim',
-  loop: true,            // loops until state changes
+  loop: true, // loops until state changes
   duration: 3,
-  update: (parts, progress, deltaTime) => { /* ... */ },
-  reset: (parts) => { /* ... */ }
+  update: (parts, progress, deltaTime) => {
+    /* ... */
+  },
+  reset: (parts) => {
+    /* ... */
+  },
 }
 
 // Map to station
@@ -242,6 +264,7 @@ export const STATION_ANIMATIONS: StationAnimations = {
 **Dev panel:** Press `Alt+D` to test animations in-browser.
 
 ### `src/entities/SubagentManager.ts`
+
 Manages subagent visualizations:
 
 - `spawn(toolUseId, description)` - Creates mini-Claude at portal when Task starts
@@ -251,6 +274,7 @@ Manages subagent visualizations:
 - Tracks count for stats display
 
 ### `src/scene/ZoneNotifications.ts`
+
 Floating notification system for zones:
 
 - Shows tool completions as floating text above zones
@@ -265,18 +289,20 @@ scene.zoneNotifications.showForTool(sessionId, 'Read', 'config.ts')
 // Show custom notification
 scene.zoneNotifications.show(sessionId, {
   text: 'Custom message',
-  style: 'success',  // success, info, warning, error, muted
+  style: 'success', // success, info, warning, error, muted
   icon: '✨',
   duration: 3,
 })
 ```
 
 **Helper functions:**
+
 - `formatFileChange(fileName, { added, removed, lines })` - "file.ts +5, -2"
 - `formatCommandResult(command)` - Truncates long commands
 - `formatSearchResult(pattern, matchCount)` - "pattern" → N matches
 
 ### `src/events/EventClient.ts`
+
 WebSocket client for browser:
 
 - Auto-reconnect with configurable interval
@@ -286,6 +312,7 @@ WebSocket client for browser:
 **History handling**: History events arrive in chronological order (pre before post). The `onHistory` handler allows pre-scanning all events for `post_tool_use` to build a `completedToolUses` set BEFORE rendering icons. This prevents old pre_tool_use events from showing as "pending".
 
 ### `src/main.ts`
+
 Main application entry point:
 
 - Initializes scene, character, event client
@@ -293,9 +320,10 @@ Main application entry point:
 - `addToTimeline()` - Adds emoji icons to the timeline strip
 - `setupPromptForm()` - Handles browser prompt submission
 
-**Tool movement logic**: Only moves Claude for tools that map to non-center stations. MCP browser tools (mcp__*) map to 'center' which would overwrite real movements.
+**Tool movement logic**: Only moves Claude for tools that map to non-center stations. MCP browser tools (mcp\_\_\*) map to 'center' which would overwrite real movements.
 
 ### `src/ui/FeedManager.ts`
+
 Activity feed panel manager:
 
 - Renders events (prompts, tool uses, responses) in scrollable feed
@@ -304,13 +332,14 @@ Activity feed panel manager:
 - Thinking indicator with animated dots
 
 ```typescript
-feedManager.add(event, sessionColor)     // Add event to feed
-feedManager.setFilter(sessionId)         // Filter by session
-feedManager.showThinking(sessionId)      // Show "Claude is thinking..."
-feedManager.hideThinking(sessionId)      // Remove thinking indicator
+feedManager.add(event, sessionColor) // Add event to feed
+feedManager.setFilter(sessionId) // Filter by session
+feedManager.showThinking(sessionId) // Show "Claude is thinking..."
+feedManager.hideThinking(sessionId) // Remove thinking indicator
 ```
 
 ### `src/ui/QuestionModal.ts`
+
 AskUserQuestion tool UI:
 
 - Shows questions with option buttons
@@ -319,6 +348,7 @@ AskUserQuestion tool UI:
 - Updates zone attention state
 
 ### `src/ui/PermissionModal.ts`
+
 Tool permission request UI:
 
 - Shows when sessions run without `--dangerously-skip-permissions`
@@ -327,6 +357,7 @@ Tool permission request UI:
 - Manages zone attention and attention queue
 
 ### `src/ui/DrawMode.ts`
+
 Hex painting mode for decorative coloring:
 
 - `D` key toggles draw mode on/off
@@ -349,6 +380,7 @@ drawMode.onChange((state) => {...})  // Subscribe to state changes
 **Note:** Painted hexes are currently stored in memory only. See "Persistence" section for storage options.
 
 ### `src/ui/TextLabelModal.ts`
+
 Custom modal for text tile input:
 
 - Replaces browser's `prompt()` with themed textarea
@@ -370,6 +402,7 @@ const text = await showTextLabelModal({
 Text tiles are rendered as 3D sprites with hex-styled beveled backgrounds.
 
 ### `index.html`
+
 Single-page app with:
 
 - HUD panels (connection status, current activity, stats)
@@ -378,29 +411,30 @@ Single-page app with:
 - HTML structure only - CSS imported via main.ts
 
 ### `src/styles/`
+
 CSS is organized into modular files:
 
-| File | Purpose |
-|------|---------|
-| `index.css` | Entry point - imports all modules |
-| `base.css` | Reset, body, layout, common animations |
-| `sessions.css` | Session panel, session items, attention badges |
-| `feed.css` | Activity feed, feed items, markdown styles |
-| `prompt.css` | Prompt input, voice control, transcript |
-| `hud.css` | Scene HUD, keybinds, timeline |
-| `modals.css` | All modal styles (click menu, settings, questions, permissions) |
+| File           | Purpose                                                         |
+| -------------- | --------------------------------------------------------------- |
+| `index.css`    | Entry point - imports all modules                               |
+| `base.css`     | Reset, body, layout, common animations                          |
+| `sessions.css` | Session panel, session items, attention badges                  |
+| `feed.css`     | Activity feed, feed items, markdown styles                      |
+| `prompt.css`   | Prompt input, voice control, transcript                         |
+| `hud.css`      | Scene HUD, keybinds, timeline                                   |
+| `modals.css`   | All modal styles (click menu, settings, questions, permissions) |
 
 CSS is imported in `main.ts` via `import './styles/index.css'` and bundled by Vite.
 
 ## Event Types
 
-| Type | When | Key Fields |
-|------|------|------------|
-| `pre_tool_use` | Before tool executes | `tool`, `toolUseId`, `input` |
-| `post_tool_use` | After tool completes | `tool`, `toolUseId`, `success`, `duration` |
-| `stop` | Claude stops responding | `reason` |
-| `user_prompt_submit` | User sends prompt | `prompt` |
-| `notification` | System notification | `message` |
+| Type                 | When                    | Key Fields                                 |
+| -------------------- | ----------------------- | ------------------------------------------ |
+| `pre_tool_use`       | Before tool executes    | `tool`, `toolUseId`, `input`               |
+| `post_tool_use`      | After tool completes    | `tool`, `toolUseId`, `success`, `duration` |
+| `stop`               | Claude stops responding | `reason`                                   |
+| `user_prompt_submit` | User sends prompt       | `prompt`                                   |
+| `notification`       | System notification     | `message`                                  |
 
 ## Station Mapping
 
@@ -423,21 +457,25 @@ TOOL_STATION_MAP = {
 ## Common Tasks
 
 ### Adding a new station
+
 1. Add position to `STATION_POSITIONS` in `WorkshopScene.ts`
 2. Create station mesh in `createStations()`
 3. Update `StationType` in `shared/types.ts`
 4. Map relevant tools in `TOOL_STATION_MAP`
 
 ### Adding a new tool mapping
+
 1. Edit `TOOL_STATION_MAP` in `shared/types.ts`
 2. If new station needed, follow above
 
 ### Debugging events
+
 1. Check `data/events.jsonl` for raw events
 2. Enable debug: `VIBECRAFT_DEBUG=true npm run dev:server`
 3. Browser console shows event client logs
 
 ### Performance issues
+
 - Reduce shadow map size in `WorkshopScene.ts`
 - Disable shadows entirely with `renderer.shadowMap.enabled = false`
 - Reduce station geometry complexity
@@ -450,17 +488,18 @@ All default values are defined in **`shared/defaults.ts`** - the single source o
 
 ```typescript
 export const DEFAULTS = {
-  SERVER_PORT: 4003,              // WebSocket/API server
-  CLIENT_PORT: 4002,              // Vite dev server
+  SERVER_PORT: 4003, // WebSocket/API server
+  CLIENT_PORT: 4002, // Vite dev server
   EVENTS_FILE: '~/.vibecraft/data/events.jsonl',
   SESSIONS_FILE: '~/.vibecraft/data/sessions.json',
   MAX_EVENTS: 1000,
   TMUX_SESSION: 'claude',
-  CLAUDE_COMMAND: 'claude',       // CLI command (or 'happy', etc.)
+  CLAUDE_COMMAND: 'claude', // CLI command (or 'happy', etc.)
 }
 ```
 
 This file is imported by:
+
 - `server/index.ts` - Server configuration (expands `~` at runtime)
 - `vite.config.ts` - Dev server and build-time injection
 - Frontend gets the port via Vite's `define` at build time
@@ -470,6 +509,7 @@ This file is imported by:
 ### Data Directory
 
 Vibecraft stores all data in `~/.vibecraft/data/`:
+
 - `events.jsonl` - Event log (append-only)
 - `sessions.json` - Session persistence
 - `config.json` - Server config (CLI command, etc.)
@@ -481,6 +521,7 @@ This location is used regardless of how vibecraft was installed (npx cache, glob
 ## Persistence Architecture
 
 See **[docs/STORAGE.md](docs/STORAGE.md)** for complete documentation of:
+
 - localStorage keys and formats
 - Server files and schemas
 - Decision guide for choosing storage location
@@ -488,28 +529,84 @@ See **[docs/STORAGE.md](docs/STORAGE.md)** for complete documentation of:
 
 **Quick summary:**
 
-| Storage | Used For | Examples |
-|---------|----------|----------|
-| localStorage | User preferences, offline content | Volume, keybinds, hex art |
+| Storage                             | Used For                          | Examples                     |
+| ----------------------------------- | --------------------------------- | ---------------------------- |
+| localStorage                        | User preferences, offline content | Volume, keybinds, hex art    |
 | Server files (`~/.vibecraft/data/`) | Shared state, server-managed data | Sessions, text tiles, events |
 
 ### Environment Variables
 
 Environment variables override the defaults:
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `VIBECRAFT_PORT` | 4003 | WebSocket/API server port |
-| `VIBECRAFT_CLIENT_PORT` | 4002 | Vite dev server port |
-| `VIBECRAFT_EVENTS_FILE` | ~/.vibecraft/data/events.jsonl | Event log path |
-| `VIBECRAFT_DEBUG` | false | Enable verbose logging |
-| `VIBECRAFT_TMUX_SESSION` | claude | tmux session for prompt injection |
-| `VIBECRAFT_SESSIONS_FILE` | ~/.vibecraft/data/sessions.json | Session persistence file |
-| `VIBECRAFT_DATA_DIR` | ~/.vibecraft/data | Hook data directory |
-| `VIBECRAFT_CLAUDE_COMMAND` | claude | CLI command to spawn sessions (e.g., "happy") |
-| `DEEPGRAM_API_KEY` | (none) | Deepgram API key for voice input |
+| Variable                   | Default                         | Purpose                                       |
+| -------------------------- | ------------------------------- | --------------------------------------------- |
+| `VIBECRAFT_PORT`           | 4003                            | WebSocket/API server port                     |
+| `VIBECRAFT_CLIENT_PORT`    | 4002                            | Vite dev server port                          |
+| `VIBECRAFT_EVENTS_FILE`    | ~/.vibecraft/data/events.jsonl  | Event log path                                |
+| `VIBECRAFT_DEBUG`          | false                           | Enable verbose logging                        |
+| `VIBECRAFT_TMUX_SESSION`   | claude                          | tmux session for prompt injection             |
+| `VIBECRAFT_SESSIONS_FILE`  | ~/.vibecraft/data/sessions.json | Session persistence file                      |
+| `VIBECRAFT_DATA_DIR`       | ~/.vibecraft/data               | Hook data directory                           |
+| `VIBECRAFT_CLAUDE_COMMAND` | claude                          | CLI command to spawn sessions (e.g., "happy") |
+| `DEEPGRAM_API_KEY`         | (none)                          | Deepgram API key for voice input              |
 
 A `.env` file is included with defaults - just run `npm run dev`.
+
+## Additional API Endpoints
+
+### File Changes / Rollback API
+
+Track and rollback file changes made by Edit/Write tools:
+
+| Endpoint                    | Method | Description                                         |
+| --------------------------- | ------ | --------------------------------------------------- |
+| `/api/changes`              | GET    | Get recent file changes (last 50)                   |
+| `/api/changes/session/:id`  | GET    | Get changes for a specific session                  |
+| `/api/changes/:id`          | GET    | Get a specific change                               |
+| `/api/changes/:id/rollback` | POST   | Rollback a change (restores file to previous state) |
+| `/api/changes/stats`        | GET    | Get change statistics                               |
+
+**Change object:**
+
+```typescript
+interface FileChange {
+  id: string
+  sessionId: string
+  toolUseId: string
+  tool: string // Edit, Write, NotebookEdit
+  path: string // Absolute file path
+  before: string | null // Content before (null if created)
+  after: string // Content after
+  timestamp: number
+  rolledBack: boolean
+}
+```
+
+### Google Jules API
+
+Integration with Google's async coding agent. Requires `npm install -g @google/jules`.
+
+| Endpoint               | Method | Description                                     |
+| ---------------------- | ------ | ----------------------------------------------- |
+| `/api/jules/status`    | GET    | Check if Jules CLI is installed                 |
+| `/api/jules/tasks`     | GET    | Get all Jules tasks                             |
+| `/api/jules/tasks`     | POST   | Create a new task (body: `{repo, description}`) |
+| `/api/jules/tasks/:id` | GET    | Get a specific task                             |
+
+**Task object:**
+
+```typescript
+interface JulesTask {
+  sessionId: string
+  repo: string
+  description: string
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  createdAt: number
+  updatedAt: number
+  prUrl?: string // PR URL when completed
+  error?: string // Error message if failed
+}
+```
 
 ## Bugs Fixed (Reference)
 
@@ -523,23 +620,25 @@ A `.env` file is included with defaults - just run `npm run dev`.
 ## State Management
 
 The system maintains state synchronization between:
+
 - **Server** (`server/index.ts`) - Source of truth for managed sessions
 - **Client** (`src/main.ts`) - Receives session updates via WebSocket
 
 ### Session Status Transitions
 
-| Event | Status Change |
-|-------|---------------|
-| `user_prompt_submit` | → `working` (Claude is processing) |
-| `pre_tool_use` | → `working` (tool running) |
-| `post_tool_use` | Stay `working` (more tools may follow) |
-| `stop` / `session_end` | → `idle` (Claude finished) |
-| tmux session dies | → `offline` (health check) |
-| No activity for 2 min | → `idle` (timeout failsafe) |
+| Event                  | Status Change                          |
+| ---------------------- | -------------------------------------- |
+| `user_prompt_submit`   | → `working` (Claude is processing)     |
+| `pre_tool_use`         | → `working` (tool running)             |
+| `post_tool_use`        | Stay `working` (more tools may follow) |
+| `stop` / `session_end` | → `idle` (Claude finished)             |
+| tmux session dies      | → `offline` (health check)             |
+| No activity for 2 min  | → `idle` (timeout failsafe)            |
 
 ### Persistence
 
 Sessions are persisted to `data/sessions.json`:
+
 - Saved on: create, update, delete, link, status change
 - Loaded on: server restart (sessions start as `offline`, health check updates)
 - Contains: `sessions[]`, `claudeToManagedMap`, `sessionCounter`
@@ -610,6 +709,13 @@ Client rebuilds its local `claudeToManagedLink` map from server data on every `s
 - **Station panels**: Toggle with P key to see recent tool history per workstation (last 3 items)
 - **Station glow pulse**: Brief ring highlight when tools use stations
 - **Zone Command modal**: Right-click zone → C for quick prompt input positioned near the 3D zone
+- **Session sidebar enhancements**: Pin sessions to top (📌), drag-drop reordering, archive sessions
+- **Model selector**: Choose Claude model (sonnet/opus/haiku) when creating sessions
+- **Extended thinking toggle**: Enable `--thinking` flag for extended thinking mode
+- **MCP registry**: Tracks and categorizes MCP servers dynamically based on observed tool usage
+- **Improved session liveness**: Health checks verify Claude is actually running in tmux pane, not just that session exists
+- **File change rollback**: Track Edit/Write changes with ability to rollback via API (`/api/changes`)
+- **Google Jules integration**: Async coding agent that creates PRs (`/api/jules/*`)
 
 ## Sound System
 
@@ -628,13 +734,13 @@ import { soundManager } from './audio/SoundManager'
 await soundManager.init()
 
 // Play sounds
-soundManager.play('bash')           // Play by sound name
-soundManager.playTool('Read')       // Play by tool name
-soundManager.playResult(true)       // Play success/error
+soundManager.play('bash') // Play by sound name
+soundManager.playTool('Read') // Play by tool name
+soundManager.playResult(true) // Play success/error
 
 // Control
-soundManager.setVolume(0.5)         // 0-1
-soundManager.setEnabled(false)      // Mute all
+soundManager.setVolume(0.5) // 0-1
+soundManager.setEnabled(false) // Mute all
 ```
 
 ### Sound Catalog
@@ -683,6 +789,7 @@ soundManager.setEnabled(false)      // Mute all
 ### Integration Points
 
 Sounds are triggered via **EventBus handlers** in `src/events/handlers/soundHandlers.ts`:
+
 - `pre_tool_use` → `soundManager.playTool(event.tool)`
 - `pre_tool_use` (Bash with `git commit`) → `soundManager.play('git_commit')`
 - `post_tool_use` → `soundManager.playResult(event.success)`
@@ -698,31 +805,36 @@ Character movement sounds (`walking`) are in `characterHandlers.ts`.
 Sounds can be positioned in 3D space based on zone location relative to the camera.
 
 **Files:**
+
 - `src/audio/SpatialAudioContext.ts` - Manages listener position and calculates spatial params
 - `src/audio/SoundManager.ts` - Integrates spatial audio with sound playback
 
 **Spatial modes:**
+
 - `positional` - Affected by distance/pan (tool sounds, zone events)
 - `global` - Always centered, full volume (git commit, notifications, UI sounds)
 
 **Features:**
+
 - **Distance volume:** Far zones are quieter (min 30% volume, never silent)
 - **Stereo panning:** Zones to left/right of camera pan accordingly (±0.7 max)
 - **Focus boost:** Selected zone gets +25% volume regardless of distance
 - **Toggle in settings:** Users can disable spatial audio entirely
 
 **Usage:**
+
 ```typescript
 // Play with spatial positioning (for positional sounds)
 soundManager.play('read', { zoneId: 'session-123' })
 soundManager.playTool('Bash', { zoneId: 'session-123' })
 
 // Play without spatial (for global sounds, or when no zone context)
-soundManager.play('git_commit')  // git_commit is global by definition
-soundManager.play('notification')  // notification is global
+soundManager.play('git_commit') // git_commit is global by definition
+soundManager.play('notification') // notification is global
 ```
 
 **Configuration (in main.ts):**
+
 ```typescript
 // Set up zone position resolver
 soundManager.setZonePositionResolver((zoneId) => scene.getZoneWorldPosition(zoneId))
@@ -736,26 +848,26 @@ setInterval(() => {
 
 ## Keyboard Shortcuts
 
-| Key | Context | Action |
-|-----|---------|--------|
-| `Tab` | Anywhere | Switch focus between Workshop and Activity Feed |
-| `Esc` | Anywhere | Switch focus between Workshop and Activity Feed |
-| `1-6` | Not in input | Switch to session 1-6 (shown in UI) |
-| `Q-Y` | Not in input | Switch to session 7-12 (extended) |
-| `A-H` | Not in input | Switch to session 13-18 (extended) |
-| `Z-N` | Not in input | Switch to session 19-24 (extended) |
-| `Alt+key` | Anywhere | Switch to session (works in inputs) |
-| `0` or `` ` `` | Not in input | All sessions / overview |
-| `Alt+0` or `Alt+`` | Anywhere | All sessions / overview |
-| `Alt+N` | Anywhere | Open new session modal |
-| `Alt+A` | Anywhere | Go to next session needing attention |
-| `Alt+Space` | Anywhere | Expand most recent "show more" in feed |
-| `Alt+R` | Anywhere | Toggle voice recording |
-| `F` | Not in input | Toggle follow-active mode |
-| `P` | Not in input | Toggle station panels (tool history) |
-| `Alt+D` | Anywhere | Toggle dev panel |
-| `D` | Not in input | Toggle draw mode |
-| `Ctrl+C` | Not in input | Context-aware: copy if text selected, interrupt working session otherwise |
+| Key                | Context      | Action                                                                    |
+| ------------------ | ------------ | ------------------------------------------------------------------------- |
+| `Tab`              | Anywhere     | Switch focus between Workshop and Activity Feed                           |
+| `Esc`              | Anywhere     | Switch focus between Workshop and Activity Feed                           |
+| `1-6`              | Not in input | Switch to session 1-6 (shown in UI)                                       |
+| `Q-Y`              | Not in input | Switch to session 7-12 (extended)                                         |
+| `A-H`              | Not in input | Switch to session 13-18 (extended)                                        |
+| `Z-N`              | Not in input | Switch to session 19-24 (extended)                                        |
+| `Alt+key`          | Anywhere     | Switch to session (works in inputs)                                       |
+| `0` or `` ` ``     | Not in input | All sessions / overview                                                   |
+| `Alt+0` or `Alt+`` | Anywhere     | All sessions / overview                                                   |
+| `Alt+N`            | Anywhere     | Open new session modal                                                    |
+| `Alt+A`            | Anywhere     | Go to next session needing attention                                      |
+| `Alt+Space`        | Anywhere     | Expand most recent "show more" in feed                                    |
+| `Alt+R`            | Anywhere     | Toggle voice recording                                                    |
+| `F`                | Not in input | Toggle follow-active mode                                                 |
+| `P`                | Not in input | Toggle station panels (tool history)                                      |
+| `Alt+D`            | Anywhere     | Toggle dev panel                                                          |
+| `D`                | Not in input | Toggle draw mode                                                          |
+| `Ctrl+C`           | Not in input | Context-aware: copy if text selected, interrupt working session otherwise |
 
 **Draw Mode Keys (when active):**
 | Key | Action |
@@ -773,13 +885,13 @@ Extended keybinds (QWERTY, ASDFGH, ZXCVBN) work but are not displayed in the UI.
 
 ### npm Scripts
 
-| Script | Description |
-|--------|-------------|
-| `npm run dev` | Start dev server (Vite + tsx watch) |
-| `npm run build` | Build both server and client |
+| Script                 | Description                                 |
+| ---------------------- | ------------------------------------------- |
+| `npm run dev`          | Start dev server (Vite + tsx watch)         |
+| `npm run build`        | Build both server and client                |
 | `npm run build:server` | Compile server TypeScript to `dist/server/` |
-| `npm run build:client` | Build frontend to `dist/` |
-| `npm run server` | Run server with tsx (dev) |
+| `npm run build:client` | Build frontend to `dist/`                   |
+| `npm run server`       | Run server with tsx (dev)                   |
 
 ### CLI Commands
 
@@ -802,6 +914,7 @@ npm publish
 ```
 
 Users can then run:
+
 ```bash
 npx vibecraft setup
 npx vibecraft
