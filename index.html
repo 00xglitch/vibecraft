@@ -149,6 +149,9 @@
           </div>
         </div>
 
+        <!-- Plugin Panel -->
+        <div id="plugin-container"></div>
+
         <!-- Terminal output panel (hidden by default) -->
         <div id="terminal-panel" class="hidden">
           <div id="terminal-output"></div>
@@ -216,8 +219,21 @@
 
         <!-- Claude Options -->
         <div class="modal-field" id="claude-options">
+          <label>Model</label>
+          <div class="settings-select-row" style="margin-bottom: 12px">
+            <select id="session-opt-model" class="modal-select" style="width: 160px">
+              <option value="">Default</option>
+              <option value="sonnet">Sonnet</option>
+              <option value="opus">Opus</option>
+              <option value="haiku">Haiku</option>
+            </select>
+          </div>
           <label>Options</label>
           <div class="modal-checkboxes">
+            <label class="modal-checkbox">
+              <input type="checkbox" id="session-opt-thinking" />
+              <span class="checkbox-label">Extended thinking <code>--thinking</code></span>
+            </label>
             <label class="modal-checkbox">
               <input type="checkbox" id="session-opt-continue" />
               <span class="checkbox-label">Continue <code>-c</code></span>
@@ -273,6 +289,12 @@
             <select id="settings-character" class="settings-select">
               <option value="robot">Robot</option>
               <option value="flower">Flower</option>
+              <option value="rick">Rick</option>
+              <option value="morty">Morty</option>
+              <option value="ninja">Ninja</option>
+              <option value="wizard">Wizard</option>
+              <option value="afrosamurai">Afro Samurai</option>
+              <option value="pacman">Pacman</option>
             </select>
             <span class="field-hint-inline">Character appearance</span>
           </div>
