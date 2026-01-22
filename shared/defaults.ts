@@ -34,6 +34,20 @@ export const DEFAULTS = {
 
   /** CLI command to run (e.g., 'claude' or 'happy') */
   CLAUDE_COMMAND: 'claude',
+
+  // Memory Budget Settings
+  /** Maximum total zones allowed (hard cap) */
+  MAX_ZONES: 30,
+  /** Maximum zones with full detail loaded simultaneously */
+  MAX_LOADED_ZONES: 5,
+  /** Garbage collection interval in milliseconds */
+  GC_INTERVAL_MS: 30000,
+
+  // LOD Settings
+  /** Distance for HIGH detail (focused zone) */
+  LOD_HIGH_DISTANCE: 25,
+  /** Distance for MEDIUM detail (beyond this is LOW) */
+  LOD_MEDIUM_DISTANCE: 60,
 } as const
 
 export type Defaults = typeof DEFAULTS

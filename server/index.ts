@@ -15,7 +15,15 @@ import 'dotenv/config'
 import { createServer, IncomingMessage, ServerResponse } from 'http'
 import { WebSocketServer, WebSocket, RawData } from 'ws'
 import { watch } from 'chokidar'
-import { readFileSync, writeFileSync, existsSync, appendFileSync, mkdirSync, unlinkSync, statSync } from 'fs'
+import {
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  appendFileSync,
+  mkdirSync,
+  unlinkSync,
+  statSync,
+} from 'fs'
 import { exec, execFile } from 'child_process'
 import { dirname, resolve, join, extname } from 'path'
 import { hostname } from 'os'
@@ -33,32 +41,54 @@ import type {
   CreateImplicitSessionRequest,
   UpdateSessionRequest,
   SessionPromptRequest,
-  GitStatus,
   TextTile,
   CreateTextTileRequest,
   UpdateTextTileRequest,
+  CreateWorkspaceRequest,
+  UpdateWorkspaceRequest,
+  CreateProjectRequest,
 } from '../shared/types.js'
 import { DEFAULTS } from '../shared/defaults.js'
 import { GitStatusManager } from './GitStatusManager.js'
 import { ProjectsManager } from './ProjectsManager.js'
 import { detectProjectName } from './projectDetector.js'
-import { opencodeManager, OpenCodeServer } from './OpenCodeProcessManager.js'
+import { projectDiscovery } from './ProjectDiscovery.js'
+import { workspaceManager } from './WorkspaceManager.js'
+import { opencodeManager } from './OpenCodeProcessManager.js'
 import { fileURLToPath } from 'url'
 import { OpencodeClient } from '@opencode-ai/sdk'
-import { sendPromptToOpenCodeSession, createOpenCodeSession, deleteOpenCodeSession, restartOpenCodeSession, checkOpenCodeHealth } from './opencode/index.js'
+import {
+  sendPromptToOpenCodeSession,
+  createOpenCodeSession,
+  deleteOpenCodeSession,
+  restartOpenCodeSession,
+  checkOpenCodeHealth,
+} from './opencode/index.js'
 import { registerOpenCodeRoutes } from './opencode/routes.js'
+import {
+  orchestratorManager,
+  langGraphPlugin,
+  crewAIPlugin,
+  autoGenPlugin,
+  type OrchestratorTaskRequest,
+} from './orchestrator/index.js'
+import { ChangeTracker } from './ChangeTracker.js'
+import { julesService } from './JulesService.js'
 
 // ============================================================================
 // OpenCode Integration State
 // ============================================================================
 
-const opencodeSessions = new Map<string, {
-  serverId: string
-  eventSource?: EventSource
-  abortController?: AbortController
-  client?: OpencodeClient
-  opencodeSessionId: string
-}>()
+const opencodeSessions = new Map<
+  string,
+  {
+    serverId: string
+    eventSource?: EventSource
+    abortController?: AbortController
+    client?: OpencodeClient
+    opencodeSessionId: string
+  }
+>()
 
 // ============================================================================
 // Version (read from package.json)
@@ -71,8 +101,8 @@ function getPackageVersion(): string {
   try {
     // Try multiple locations (dev vs compiled)
     const locations = [
-      resolve(__dirname, '../package.json'),      // dev: server/ -> package.json
-      resolve(__dirname, '../../package.json'),   // compiled: dist/server/ -> package.json
+      resolve(__dirname, '../package.json'), // dev: server/ -> package.json
+      resolve(__dirname, '../../package.json'), // compiled: dist/server/ -> package.json
     ]
     for (const loc of locations) {
       if (existsSync(loc)) {
@@ -102,14 +132,22 @@ function expandHome(path: string): string {
 
 const PORT = parseInt(process.env.VIBECRAFT_PORT ?? String(DEFAULTS.SERVER_PORT), 10)
 const EVENTS_FILE = resolve(expandHome(process.env.VIBECRAFT_EVENTS_FILE ?? DEFAULTS.EVENTS_FILE))
-const PENDING_PROMPT_FILE = resolve(expandHome(process.env.VIBECRAFT_PROMPT_FILE ?? '~/.vibecraft/data/pending-prompt.txt'))
+const PENDING_PROMPT_FILE = resolve(
+  expandHome(process.env.VIBECRAFT_PROMPT_FILE ?? '~/.vibecraft/data/pending-prompt.txt')
+)
 const MAX_EVENTS = parseInt(process.env.VIBECRAFT_MAX_EVENTS ?? String(DEFAULTS.MAX_EVENTS), 10)
 const DEBUG = process.env.VIBECRAFT_DEBUG === 'true'
 const TMUX_SESSION = process.env.VIBECRAFT_TMUX_SESSION ?? DEFAULTS.TMUX_SESSION
-const SESSIONS_FILE = resolve(expandHome(process.env.VIBECRAFT_SESSIONS_FILE ?? DEFAULTS.SESSIONS_FILE))
-const CONFIG_FILE = resolve(expandHome(process.env.VIBECRAFT_CONFIG_FILE ?? '~/.vibecraft/data/config.json'))
+const SESSIONS_FILE = resolve(
+  expandHome(process.env.VIBECRAFT_SESSIONS_FILE ?? DEFAULTS.SESSIONS_FILE)
+)
+const CONFIG_FILE = resolve(
+  expandHome(process.env.VIBECRAFT_CONFIG_FILE ?? '~/.vibecraft/data/config.json')
+)
 let claudeCommand = process.env.VIBECRAFT_CLAUDE_COMMAND ?? DEFAULTS.CLAUDE_COMMAND
-const TILES_FILE = resolve(expandHome(process.env.VIBECRAFT_TILES_FILE ?? '~/.vibecraft/data/tiles.json'))
+const TILES_FILE = resolve(
+  expandHome(process.env.VIBECRAFT_TILES_FILE ?? '~/.vibecraft/data/tiles.json')
+)
 const WORKTREES_DIR = resolve(expandHome('~/.vibecraft/worktrees'))
 
 /** Time before a "working" session auto-transitions to idle (failsafe for missed events) */
@@ -124,9 +162,9 @@ const WORKING_CHECK_INTERVAL_MS = 10_000 // 10 seconds
 /** Extended PATH for exec() - includes Homebrew and user paths for macOS/Linux */
 const HOME = process.env.HOME || ''
 const EXEC_PATH = [
-  `${HOME}/.local/bin`,     // User local bin (Claude CLI default location)
-  '/opt/homebrew/bin',      // macOS Apple Silicon Homebrew
-  '/usr/local/bin',         // macOS Intel Homebrew / Linux local
+  `${HOME}/.local/bin`, // User local bin (Claude CLI default location)
+  '/opt/homebrew/bin', // macOS Apple Silicon Homebrew
+  '/usr/local/bin', // macOS Intel Homebrew / Linux local
   process.env.PATH || '',
 ].join(':')
 
@@ -273,7 +311,10 @@ async function createWorktree(
     }
 
     // Create safe branch name from session name (lowercase, replace spaces with hyphens)
-    const safeName = sessionName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+    const safeName = sessionName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
     const shortId = sessionId.slice(0, 8)
     const branchName = `vibecraft/${safeName}-${shortId}`
     const worktreePath = join(WORKTREES_DIR, sessionId)
@@ -342,7 +383,10 @@ async function removeWorktree(
  * Safely collect request body with size limit to prevent DoS.
  * Returns a promise that resolves with the body string or rejects on error/oversized.
  */
-function collectRequestBody(req: IncomingMessage, maxSize: number = MAX_BODY_SIZE): Promise<string> {
+function collectRequestBody(
+  req: IncomingMessage,
+  maxSize: number = MAX_BODY_SIZE
+): Promise<string> {
   return new Promise((resolve, reject) => {
     let body = ''
     let size = 0
@@ -380,7 +424,7 @@ async function sendToTmuxSafe(tmuxSession: string, text: string): Promise<void> 
     // Paste buffer into session
     await execFileAsync('tmux', ['paste-buffer', '-t', tmuxSession])
     // Send Enter to submit
-    await new Promise(r => setTimeout(r, 100)) // Small delay like original
+    await new Promise((r) => setTimeout(r, 100)) // Small delay like original
     await execFileAsync('tmux', ['send-keys', '-t', tmuxSession, 'Enter'])
   } finally {
     // Clean up temp file
@@ -413,25 +457,25 @@ let lastFileSize = 0
 
 /** Token tracking per session */
 interface SessionTokens {
-  lastSeen: number  // Last token count seen in output
-  cumulative: number  // Running total (estimated)
-  lastUpdate: number  // Timestamp
+  lastSeen: number // Last token count seen in output
+  cumulative: number // Running total (estimated)
+  lastUpdate: number // Timestamp
 }
 const sessionTokens = new Map<string, SessionTokens>()
 
-/** Last parsed tmux output (to detect changes) */
-let lastTmuxHash = ''
+/** Last parsed tmux output (to detect changes) - per-session to avoid collision */
+const sessionTmuxHash = new Map<string, string>()
 
 /** Track pending permission prompts per session */
 interface PermissionOption {
-  number: string     // "1", "2", "3"
-  label: string      // "Yes", "Yes, and always allow...", "No"
+  number: string // "1", "2", "3"
+  label: string // "Yes", "Yes, and always allow...", "No"
 }
 
 interface PermissionPrompt {
   tool: string
-  context: string       // The full prompt text
-  options: PermissionOption[]  // Available choices
+  context: string // The full prompt text
+  options: PermissionOption[] // Available choices
   detectedAt: number
 }
 const pendingPermissions = new Map<string, PermissionPrompt>()
@@ -450,6 +494,11 @@ const gitStatusManager = new GitStatusManager()
 
 /** Project directories manager */
 const projectsManager = new ProjectsManager()
+
+/** File change tracker for rollback functionality */
+const changeTracker = new ChangeTracker({
+  dataDir: resolve(expandHome('~/.vibecraft/data')),
+})
 
 /** Active voice transcription sessions (WebSocket client → Deepgram connection) */
 const voiceSessions = new Map<WebSocket, LiveClient>()
@@ -506,8 +555,8 @@ function debug(...args: unknown[]) {
 function parseTokensFromOutput(output: string): number | null {
   // Match patterns like: ↓ 879 tokens, ↓ 1,234 tokens, ↓ 12.5k tokens
   const patterns = [
-    /↓\s*([0-9,]+)\s*tokens?/gi,           // ↓ 879 tokens, ↓ 1,234 tokens
-    /↓\s*([0-9.]+)k\s*tokens?/gi,          // ↓ 12.5k tokens, ↓ 12k tokens
+    /↓\s*([0-9,]+)\s*tokens?/gi, // ↓ 879 tokens, ↓ 1,234 tokens
+    /↓\s*([0-9.]+)k\s*tokens?/gi, // ↓ 12.5k tokens, ↓ 12k tokens
   ]
 
   let maxTokens = 0
@@ -540,56 +589,61 @@ function pollTokens(tmuxSession: string): void {
     return
   }
 
-  execFile('tmux', ['capture-pane', '-t', tmuxSession, '-p', '-S', '-50'], { ...EXEC_OPTIONS, maxBuffer: 1024 * 1024 }, (error, stdout) => {
-    if (error) {
-      debug(`Token poll failed: ${error.message}`)
-      return
+  execFile(
+    'tmux',
+    ['capture-pane', '-t', tmuxSession, '-p', '-S', '-50'],
+    { ...EXEC_OPTIONS, maxBuffer: 1024 * 1024 },
+    (error, stdout) => {
+      if (error) {
+        debug(`Token poll failed: ${error.message}`)
+        return
+      }
+
+      // Simple hash to detect changes (per-session to avoid collision between sessions)
+      const hash = stdout.slice(-500)
+      if (hash === sessionTmuxHash.get(tmuxSession)) return
+      sessionTmuxHash.set(tmuxSession, hash)
+
+      const tokens = parseTokensFromOutput(stdout)
+      if (tokens === null) return
+
+      // Update session tokens (use TMUX_SESSION as session ID for now)
+      let session = sessionTokens.get(tmuxSession)
+      if (!session) {
+        session = { lastSeen: 0, cumulative: 0, lastUpdate: Date.now() }
+        sessionTokens.set(tmuxSession, session)
+      }
+
+      // If we see a higher token count, update cumulative
+      if (tokens > session.lastSeen) {
+        const delta = tokens - session.lastSeen
+        session.cumulative += delta
+        session.lastSeen = tokens
+        session.lastUpdate = Date.now()
+
+        debug(`Tokens updated: ${tokens} (cumulative: ${session.cumulative})`)
+
+        // Find managed session ID for this tmux session (O(1) lookup via reverse map)
+        const managedSessionId = tmuxToManagedMap.get(tmuxSession)
+
+        // Broadcast token update
+        broadcast({
+          type: 'tokens',
+          payload: {
+            session: tmuxSession,
+            sessionId: managedSessionId,
+            current: tokens,
+            cumulative: session.cumulative,
+          },
+        } as ServerMessage)
+      } else if (tokens < session.lastSeen && tokens > 0) {
+        // Token count dropped - likely new conversation, reset tracking
+        session.lastSeen = tokens
+        session.lastUpdate = Date.now()
+        debug(`Token count reset detected: ${tokens}`)
+      }
     }
-
-    // Simple hash to detect changes
-    const hash = stdout.slice(-500)
-    if (hash === lastTmuxHash) return
-    lastTmuxHash = hash
-
-    const tokens = parseTokensFromOutput(stdout)
-    if (tokens === null) return
-
-    // Update session tokens (use TMUX_SESSION as session ID for now)
-    let session = sessionTokens.get(tmuxSession)
-    if (!session) {
-      session = { lastSeen: 0, cumulative: 0, lastUpdate: Date.now() }
-      sessionTokens.set(tmuxSession, session)
-    }
-
-    // If we see a higher token count, update cumulative
-    if (tokens > session.lastSeen) {
-      const delta = tokens - session.lastSeen
-      session.cumulative += delta
-      session.lastSeen = tokens
-      session.lastUpdate = Date.now()
-
-      debug(`Tokens updated: ${tokens} (cumulative: ${session.cumulative})`)
-
-      // Find managed session ID for this tmux session (O(1) lookup via reverse map)
-      const managedSessionId = tmuxToManagedMap.get(tmuxSession)
-
-      // Broadcast token update
-      broadcast({
-        type: 'tokens',
-        payload: {
-          session: tmuxSession,
-          sessionId: managedSessionId,
-          current: tokens,
-          cumulative: session.cumulative,
-        },
-      } as ServerMessage)
-    } else if (tokens < session.lastSeen && tokens > 0) {
-      // Token count dropped - likely new conversation, reset tracking
-      session.lastSeen = tokens
-      session.lastUpdate = Date.now()
-      debug(`Token count reset detected: ${tokens}`)
-    }
-  })
+  )
 }
 
 /**
@@ -646,7 +700,9 @@ function startTokenPolling(): void {
  *
  *   ctrl-g to edit in Vim · ~/.claude/plans/...
  */
-function detectPermissionPrompt(output: string): { tool: string; context: string; options: PermissionOption[] } | null {
+function detectPermissionPrompt(
+  output: string
+): { tool: string; context: string; options: PermissionOption[] } | null {
   const lines = output.split('\n')
 
   // Look for "Do you want to proceed?" OR "Would you like to proceed?" in recent output
@@ -695,7 +751,7 @@ function detectPermissionPrompt(output: string): { tool: string; context: string
     if (optionMatch) {
       options.push({
         number: optionMatch[1],
-        label: optionMatch[2].trim()
+        label: optionMatch[2].trim(),
       })
     }
   }
@@ -714,7 +770,9 @@ function detectPermissionPrompt(output: string): { tool: string; context: string
       break
     }
     // Also match standalone tool type like "Bash command" or "Read file"
-    const cmdMatch = lines[i].match(/^\s*(Bash|Read|Write|Edit|Grep|Glob|Task|WebFetch|WebSearch)\s+\w+/i)
+    const cmdMatch = lines[i].match(
+      /^\s*(Bash|Read|Write|Edit|Grep|Glob|Task|WebFetch|WebSearch)\s+\w+/i
+    )
     if (cmdMatch) {
       tool = cmdMatch[1]
       break
@@ -726,7 +784,9 @@ function detectPermissionPrompt(output: string): { tool: string; context: string
   const contextEnd = proceedLineIdx + 1 + options.length
   const context = lines.slice(contextStart, contextEnd).join('\n').trim()
 
-  debug(`Detected permission prompt: tool=${tool}, options=${options.map(o => o.number + ':' + o.label).join(', ')}`)
+  debug(
+    `Detected permission prompt: tool=${tool}, options=${options.map((o) => o.number + ':' + o.label).join(', ')}`
+  )
 
   return { tool, context, options }
 }
@@ -765,79 +825,86 @@ function pollPermissions(sessionId: string, tmuxSession: string): void {
     return
   }
 
-  execFile('tmux', ['capture-pane', '-t', tmuxSession, '-p', '-S', '-50'], { ...EXEC_OPTIONS, maxBuffer: 1024 * 1024 }, (error, stdout) => {
-    if (error) {
-      debug(`Permission poll failed for ${tmuxSession}: ${error.message}`)
-      return
-    }
+  execFile(
+    'tmux',
+    ['capture-pane', '-t', tmuxSession, '-p', '-S', '-50'],
+    { ...EXEC_OPTIONS, maxBuffer: 1024 * 1024 },
+    (error, stdout) => {
+      if (error) {
+        debug(`Permission poll failed for ${tmuxSession}: ${error.message}`)
+        return
+      }
 
-    // Check for bypass permissions warning (first-time use of --dangerously-skip-permissions)
-    if (detectBypassWarning(stdout) && !bypassWarningHandled.has(sessionId)) {
-      log(`Bypass permissions warning detected for session ${sessionId}, auto-accepting...`)
-      bypassWarningHandled.add(sessionId)
-      // Send "2" to accept the warning
-      execFile('tmux', ['send-keys', '-t', tmuxSession, '2'], EXEC_OPTIONS, (err) => {
-        if (err) {
-          log(`Failed to auto-accept bypass warning: ${err.message}`)
-        } else {
-          log(`Bypass permissions warning accepted for session ${sessionId}`)
-        }
-      })
-      return // Don't process further this poll cycle
-    }
+      // Check for bypass permissions warning (first-time use of --dangerously-skip-permissions)
+      if (detectBypassWarning(stdout) && !bypassWarningHandled.has(sessionId)) {
+        log(`Bypass permissions warning detected for session ${sessionId}, auto-accepting...`)
+        bypassWarningHandled.add(sessionId)
+        // Send "2" to accept the warning
+        execFile('tmux', ['send-keys', '-t', tmuxSession, '2'], EXEC_OPTIONS, (err) => {
+          if (err) {
+            log(`Failed to auto-accept bypass warning: ${err.message}`)
+          } else {
+            log(`Bypass permissions warning accepted for session ${sessionId}`)
+          }
+        })
+        return // Don't process further this poll cycle
+      }
 
-    const prompt = detectPermissionPrompt(stdout)
-    const existing = pendingPermissions.get(sessionId)
+      const prompt = detectPermissionPrompt(stdout)
+      const existing = pendingPermissions.get(sessionId)
 
-    if (prompt && !existing) {
-      // New permission prompt detected
-      pendingPermissions.set(sessionId, {
-        tool: prompt.tool,
-        context: prompt.context,
-        options: prompt.options,
-        detectedAt: Date.now(),
-      })
-
-      log(`Permission prompt detected for session ${sessionId}: ${prompt.tool} (${prompt.options.length} options)`)
-
-      // Broadcast to clients with options
-      broadcast({
-        type: 'permission_prompt',
-        payload: {
-          sessionId,
+      if (prompt && !existing) {
+        // New permission prompt detected
+        pendingPermissions.set(sessionId, {
           tool: prompt.tool,
           context: prompt.context,
           options: prompt.options,
-        },
-      } as ServerMessage)
+          detectedAt: Date.now(),
+        })
 
-      // Update session status
-      const session = managedSessions.get(sessionId)
-      if (session) {
-        session.status = 'waiting'
-        session.currentTool = prompt.tool
-        broadcastSessions()
-      }
-    } else if (!prompt && existing) {
-      // Permission prompt was resolved (user responded in terminal or elsewhere)
-      pendingPermissions.delete(sessionId)
-      log(`Permission prompt resolved for session ${sessionId}`)
+        log(
+          `Permission prompt detected for session ${sessionId}: ${prompt.tool} (${prompt.options.length} options)`
+        )
 
-      // Broadcast resolution
-      broadcast({
-        type: 'permission_resolved',
-        payload: { sessionId },
-      } as ServerMessage)
+        // Broadcast to clients with options
+        broadcast({
+          type: 'permission_prompt',
+          payload: {
+            sessionId,
+            tool: prompt.tool,
+            context: prompt.context,
+            options: prompt.options,
+          },
+        } as ServerMessage)
 
-      // Reset session status
-      const session = managedSessions.get(sessionId)
-      if (session && session.status === 'waiting') {
-        session.status = 'working'
-        session.currentTool = undefined
-        broadcastSessions()
+        // Update session status
+        const session = managedSessions.get(sessionId)
+        if (session) {
+          session.status = 'waiting'
+          session.currentTool = prompt.tool
+          broadcastSessions()
+        }
+      } else if (!prompt && existing) {
+        // Permission prompt was resolved (user responded in terminal or elsewhere)
+        pendingPermissions.delete(sessionId)
+        log(`Permission prompt resolved for session ${sessionId}`)
+
+        // Broadcast resolution
+        broadcast({
+          type: 'permission_resolved',
+          payload: { sessionId },
+        } as ServerMessage)
+
+        // Reset session status
+        const session = managedSessions.get(sessionId)
+        if (session && session.status === 'waiting') {
+          session.status = 'working'
+          session.currentTool = undefined
+          broadcastSessions()
+        }
       }
     }
-  })
+  )
 }
 
 /**
@@ -894,22 +961,27 @@ function sendPermissionResponse(sessionId: string, optionNumber: string): boolea
   }
 
   // Send the option number to tmux - Claude Code expects just the number
-  execFile('tmux', ['send-keys', '-t', session.tmuxSession, optionNumber], EXEC_OPTIONS, (error) => {
-    if (error) {
-      log(`Failed to send permission response: ${error.message}`)
-      return
+  execFile(
+    'tmux',
+    ['send-keys', '-t', session.tmuxSession, optionNumber],
+    EXEC_OPTIONS,
+    (error) => {
+      if (error) {
+        log(`Failed to send permission response: ${error.message}`)
+        return
+      }
+
+      log(`Sent permission response to ${session.name}: option ${optionNumber}`)
+
+      // Clear the pending permission
+      pendingPermissions.delete(sessionId)
+
+      // Update session status
+      session.status = 'working'
+      session.currentTool = undefined
+      broadcastSessions()
     }
-
-    log(`Sent permission response to ${session.name}: option ${optionNumber}`)
-
-    // Clear the pending permission
-    pendingPermissions.delete(sessionId)
-
-    // Update session status
-    session.status = 'working'
-    session.currentTool = undefined
-    broadcastSessions()
-  })
+  )
 
   return true
 }
@@ -934,12 +1006,7 @@ async function createSession(options: CreateSessionRequest = {}): Promise<Manage
   const tmuxSession = `vibecraft-${shortId()}`
 
   // Validate cwd to prevent command injection
-  let cwd: string
-  try {
-    cwd = validateDirectoryPath(options.cwd || process.cwd())
-  } catch (err) {
-    throw err
-  }
+  const cwd = validateDirectoryPath(options.cwd || process.cwd())
 
   // Store original cwd for reference
   const originalCwd = cwd
@@ -996,62 +1063,79 @@ async function createSession(options: CreateSessionRequest = {}): Promise<Manage
   if (flags.chrome) {
     claudeArgs.push('--chrome')
   }
+  if (flags.model) {
+    claudeArgs.push('--model', flags.model)
+  }
+  if (flags.thinking) {
+    claudeArgs.push('--thinking')
+  }
 
-  const claudeCmd = claudeArgs.length > 0 ? `${claudeCommand} ${claudeArgs.join(' ')}` : claudeCommand
+  const claudeCmd =
+    claudeArgs.length > 0 ? `${claudeCommand} ${claudeArgs.join(' ')}` : claudeCommand
 
   // Spawn tmux session with claude using execFile to prevent shell injection
   // NOTE: Must wrap in bash -c to ensure PATH is properly exported.
   // Without this, tmux uses /bin/sh which doesn't handle PATH=... cmd syntax correctly.
   return new Promise((resolve, reject) => {
-    execFile('tmux', [
-      'new-session',
-      '-d',
-      '-s', tmuxSession,
-      '-c', cwd,
-      `bash -c 'export PATH="${EXEC_PATH}"; ${claudeCmd}'`
-    ], EXEC_OPTIONS, (error) => {
-      if (error) {
-        log(`Failed to spawn session: ${error.message}`)
-        // Clean up worktree if session spawn failed
-        if (worktreeInfo) {
-          removeWorktree(worktreeInfo.path, worktreeInfo.originalRepo, worktreeInfo.branch)
-            .catch(() => {}) // Ignore cleanup errors
-        }
-        reject(new Error(`Failed to spawn session: ${error.message}`))
-        return
-      }
-
-      const session: ManagedSession = {
-        id,
-        name,
-        sessionType: 'claude',
+    execFile(
+      'tmux',
+      [
+        'new-session',
+        '-d',
+        '-s',
         tmuxSession,
-        status: 'idle',
-        createdAt: Date.now(),
-        lastActivity: Date.now(),
+        '-c',
         cwd,
-        worktree: worktreeInfo,
-        projectName: projectInfo?.name,
-        projectSource: projectInfo?.source,
+        `bash -c 'export PATH="${EXEC_PATH}"; ${claudeCmd}'`,
+      ],
+      EXEC_OPTIONS,
+      (error) => {
+        if (error) {
+          log(`Failed to spawn session: ${error.message}`)
+          // Clean up worktree if session spawn failed
+          if (worktreeInfo) {
+            removeWorktree(worktreeInfo.path, worktreeInfo.originalRepo, worktreeInfo.branch).catch(
+              () => {}
+            ) // Ignore cleanup errors
+          }
+          reject(new Error(`Failed to spawn session: ${error.message}`))
+          return
+        }
+
+        const session: ManagedSession = {
+          id,
+          name,
+          sessionType: 'claude',
+          tmuxSession,
+          status: 'idle',
+          createdAt: Date.now(),
+          lastActivity: Date.now(),
+          cwd,
+          worktree: worktreeInfo,
+          projectName: projectInfo?.name,
+          projectSource: projectInfo?.source,
+        }
+
+        managedSessions.set(id, session)
+        tmuxToManagedMap.set(tmuxSession, id)
+        log(
+          `Created session: ${name} (${id.slice(0, 8)}) -> tmux:${tmuxSession} project:${projectInfo?.name ?? 'unknown'} (${projectInfo?.source ?? 'none'})${worktreeInfo ? ` [worktree: ${worktreeInfo.branch}]` : ''}`
+        )
+
+        // Track git status for this session
+        if (cwd) {
+          gitStatusManager.track(id, cwd)
+          // Remember the original directory for future autocomplete (not the worktree)
+          projectsManager.addProject(originalCwd, name)
+        }
+
+        // Broadcast and persist
+        broadcastSessions()
+        saveSessions()
+
+        resolve(session)
       }
-
-      managedSessions.set(id, session)
-      tmuxToManagedMap.set(tmuxSession, id)
-      log(`Created session: ${name} (${id.slice(0, 8)}) -> tmux:${tmuxSession} project:${projectInfo?.name ?? 'unknown'} (${projectInfo?.source ?? 'none'})${worktreeInfo ? ` [worktree: ${worktreeInfo.branch}]` : ''}`)
-
-      // Track git status for this session
-      if (cwd) {
-        gitStatusManager.track(id, cwd)
-        // Remember the original directory for future autocomplete (not the worktree)
-        projectsManager.addProject(originalCwd, name)
-      }
-
-      // Broadcast and persist
-      broadcastSessions()
-      saveSessions()
-
-      resolve(session)
-    })
+    )
   })
 }
 
@@ -1094,7 +1178,9 @@ function createImplicitSession(options: CreateImplicitSessionRequest): ManagedSe
   managedSessions.set(id, session)
   claudeToManagedMap.set(claudeSessionId, id)
 
-  log(`Created implicit session: ${name} (${id.slice(0, 8)}) for Claude ${claudeSessionId.slice(0, 8)}`)
+  log(
+    `Created implicit session: ${name} (${id.slice(0, 8)}) for Claude ${claudeSessionId.slice(0, 8)}`
+  )
 
   // Track git status if cwd is provided
   if (cwd) {
@@ -1112,10 +1198,15 @@ function createImplicitSession(options: CreateImplicitSessionRequest): ManagedSe
  * Get all managed sessions
  */
 function getSessions(): ManagedSession[] {
-  return Array.from(managedSessions.values()).map(session => ({
-    ...session,
-    gitStatus: gitStatusManager.getStatus(session.id) ?? undefined,
-  }))
+  return Array.from(managedSessions.values()).map((session) => {
+    // Merge live token data from sessionTokens map
+    const tokens = session.tmuxSession ? sessionTokens.get(session.tmuxSession) : undefined
+    return {
+      ...session,
+      tokens: tokens ? { current: tokens.lastSeen, cumulative: tokens.cumulative } : session.tokens,
+      gitStatus: gitStatusManager.getStatus(session.id) ?? undefined,
+    }
+  })
 }
 
 /**
@@ -1137,6 +1228,15 @@ function updateSession(id: string, updates: UpdateSessionRequest): ManagedSessio
   }
   if (updates.zonePosition) {
     session.zonePosition = updates.zonePosition
+  }
+  if (updates.pinned !== undefined) {
+    session.pinned = updates.pinned
+  }
+  if (updates.sortOrder !== undefined) {
+    session.sortOrder = updates.sortOrder
+  }
+  if (updates.archived !== undefined) {
+    session.archived = updates.archived
   }
 
   log(`Updated session: ${session.name} (${id.slice(0, 8)})`)
@@ -1170,6 +1270,8 @@ async function deleteSession(id: string): Promise<boolean> {
       // Clean up all session maps
       if (session.tmuxSession) {
         tmuxToManagedMap.delete(session.tmuxSession)
+        sessionTokens.delete(session.tmuxSession)
+        sessionTmuxHash.delete(session.tmuxSession)
       }
       managedSessions.delete(id)
       gitStatusManager.untrack(id)
@@ -1179,7 +1281,9 @@ async function deleteSession(id: string): Promise<boolean> {
         }
       }
 
-      log(`Deleted session: ${session.name} (${id.slice(0, 8)})${session.worktree ? ' [worktree cleaned up]' : ''}`)
+      log(
+        `Deleted session: ${session.name} (${id.slice(0, 8)})${session.worktree ? ' [worktree cleaned up]' : ''}`
+      )
       broadcastSessions()
       saveSessions()
       resolve(true)
@@ -1192,7 +1296,17 @@ async function deleteSession(id: string): Promise<boolean> {
     }
 
     if (session.sessionType === 'opencode') {
-      deleteOpenCodeSession(id, { managedSessions, opencodeSessions, opencodeManager, gitStatusManager, log, broadcastSessions, saveSessions }).then(resolve).catch(() => resolve(false))
+      deleteOpenCodeSession(id, {
+        managedSessions,
+        opencodeSessions,
+        opencodeManager,
+        gitStatusManager,
+        log,
+        broadcastSessions,
+        saveSessions,
+      })
+        .then(resolve)
+        .catch(() => resolve(false))
       return
     }
 
@@ -1222,7 +1336,10 @@ async function deleteSession(id: string): Promise<boolean> {
 /**
  * Send a prompt to a specific session
  */
-async function sendPromptToSession(id: string, prompt: string): Promise<{ ok: boolean; error?: string }> {
+async function sendPromptToSession(
+  id: string,
+  prompt: string
+): Promise<{ ok: boolean; error?: string }> {
   const session = managedSessions.get(id)
   if (!session) {
     return { ok: false, error: 'Session not found' }
@@ -1256,46 +1373,91 @@ async function sendPromptToSession(id: string, prompt: string): Promise<{ ok: bo
 
 /**
  * Check if tmux sessions are still alive and update status
+ * Enhanced: Also verifies Claude is running in the pane, not just that tmux session exists
  */
 function checkSessionHealth(): void {
   // Skip OpenCode sessions - they have their own health check
-  const claudeSessions = Array.from(managedSessions.values()).filter(s => s.sessionType !== 'opencode')
+  const claudeSessions = Array.from(managedSessions.values()).filter(
+    (s) => s.sessionType !== 'opencode'
+  )
 
   if (claudeSessions.length === 0) return
 
-  exec('tmux list-sessions -F "#{session_name}"', EXEC_OPTIONS, (error, stdout) => {
-    if (error) {
-      // tmux might not be running - mark non-implicit Claude sessions as offline
-      for (const session of claudeSessions) {
-        // Skip implicit sessions - they don't have tmux, so can't be "offline" in that sense
-        if (isImplicitSession(session)) continue
-        if (session.status !== 'offline') {
-          session.status = 'offline'
+  // Get detailed pane info: session name, current command, and PID
+  exec(
+    'tmux list-panes -a -F "#{session_name}|#{pane_current_command}|#{pane_pid}"',
+    EXEC_OPTIONS,
+    (error, stdout) => {
+      if (error) {
+        // tmux might not be running - mark non-implicit Claude sessions as offline
+        for (const session of claudeSessions) {
+          // Skip implicit sessions - they don't have tmux, so can't be "offline" in that sense
+          if (isImplicitSession(session)) continue
+          if (session.status !== 'offline') {
+            session.status = 'offline'
+          }
+        }
+        return
+      }
+
+      // Parse pane info: Map<sessionName, { command: string, pid: string }>
+      const paneInfo = new Map<string, { command: string; pid: string }>()
+      for (const line of stdout.trim().split('\n')) {
+        const [sessionName, command, pid] = line.split('|')
+        if (sessionName) {
+          paneInfo.set(sessionName, { command: command || '', pid: pid || '' })
         }
       }
-      return
-    }
 
-    const activeSessions = new Set(stdout.trim().split('\n'))
-    let changed = false
+      let changed = false
 
-    for (const session of claudeSessions) {
-      // Skip implicit sessions - they don't have tmux to check
-      if (isImplicitSession(session)) continue
-      const isAlive = session.tmuxSession && activeSessions.has(session.tmuxSession)
-      const newStatus = isAlive ? (session.status === 'offline' ? 'idle' : session.status) : 'offline'
+      for (const session of claudeSessions) {
+        // Skip implicit sessions - they don't have tmux to check
+        if (isImplicitSession(session)) continue
 
-      if (session.status !== newStatus) {
-        session.status = newStatus
-        changed = true
+        const info = session.tmuxSession ? paneInfo.get(session.tmuxSession) : undefined
+        const tmuxExists = !!info
+        // Check if claude (or happy, or custom command) is running
+        const claudeRunning =
+          info?.command?.toLowerCase().includes('claude') ||
+          info?.command?.toLowerCase().includes('happy') ||
+          info?.command === claudeCommand
+
+        let newStatus: SessionStatus
+        if (!tmuxExists) {
+          // Session is gone
+          newStatus = 'offline'
+        } else if (session.status === 'working' || session.status === 'waiting') {
+          // Don't change working/waiting status based on health check
+          // These are event-driven states
+          newStatus = session.status
+        } else if (claudeRunning) {
+          // Claude is running - session is alive and idle (ready for input)
+          newStatus = 'idle'
+        } else {
+          // tmux exists but claude exited - could be shell prompt
+          // This might happen if Claude crashed or user exited
+          // Keep as idle for now, user can restart if needed
+          newStatus = session.status === 'offline' ? 'idle' : session.status
+        }
+
+        if (session.status !== newStatus) {
+          if (newStatus === 'offline') {
+            log(`Session "${session.name}" went offline (tmux session gone)`)
+          } else if (session.status === 'offline' && newStatus === 'idle') {
+            log(`Session "${session.name}" came back online`)
+          }
+          session.status = newStatus
+          changed = true
+        }
+      }
+
+      if (changed) {
+        broadcastSessions()
+        saveSessions() // Persist state changes
       }
     }
-
-    if (changed) {
-      broadcastSessions()
-      saveSessions() // Persist state changes
-    }
-  })
+  )
 }
 
 /**
@@ -1310,7 +1472,9 @@ function checkWorkingTimeout(): void {
     if (session.status === 'working') {
       const timeSinceActivity = now - session.lastActivity
       if (timeSinceActivity > WORKING_TIMEOUT_MS) {
-        log(`Session "${session.name}" timed out after ${Math.round(timeSinceActivity / 1000)}s of no activity`)
+        log(
+          `Session "${session.name}" timed out after ${Math.round(timeSinceActivity / 1000)}s of no activity`
+        )
         session.status = 'idle'
         session.currentTool = undefined
         changed = true
@@ -1329,14 +1493,24 @@ function checkWorkingTimeout(): void {
  */
 function saveSessions(): void {
   try {
+    // Merge token data into sessions before saving
+    const sessionsWithTokens = Array.from(managedSessions.values()).map((session) => {
+      const tokens = session.tmuxSession ? sessionTokens.get(session.tmuxSession) : undefined
+      return {
+        ...session,
+        tokens: tokens
+          ? { current: tokens.lastSeen, cumulative: tokens.cumulative }
+          : session.tokens,
+      }
+    })
     const data = {
-      sessions: Array.from(managedSessions.values()),
+      sessions: sessionsWithTokens,
       claudeToManagedMap: Array.from(claudeToManagedMap.entries()),
       sessionCounter,
     }
     writeFileSync(SESSIONS_FILE, JSON.stringify(data, null, 2))
     debug(`Saved ${managedSessions.size} sessions to ${SESSIONS_FILE}`)
-  } catch (e) {
+  } catch {
     console.error('Failed to save sessions:', e)
   }
 }
@@ -1385,7 +1559,7 @@ function loadSessions(): void {
     }
 
     log(`Loaded ${managedSessions.size} sessions from ${SESSIONS_FILE}`)
-  } catch (e) {
+  } catch {
     console.error('Failed to load sessions:', e)
   }
 }
@@ -1398,7 +1572,7 @@ function saveConfig(): void {
     const data = { cliCommand: claudeCommand }
     writeFileSync(CONFIG_FILE, JSON.stringify(data, null, 2))
     debug(`Saved config to ${CONFIG_FILE}`)
-  } catch (e) {
+  } catch {
     console.error('Failed to save config:', e)
   }
 }
@@ -1421,7 +1595,7 @@ function loadConfig(): void {
       claudeCommand = data.cliCommand
       log(`Loaded CLI command from config: ${claudeCommand}`)
     }
-  } catch (e) {
+  } catch {
     console.error('Failed to load config:', e)
   }
 }
@@ -1433,6 +1607,26 @@ function broadcastSessions(): void {
   broadcast({
     type: 'sessions',
     payload: getSessions(),
+  })
+}
+
+/**
+ * Broadcast projects to all connected clients
+ */
+function broadcastProjects(): void {
+  broadcast({
+    type: 'projects',
+    payload: projectDiscovery.getProjects(),
+  })
+}
+
+/**
+ * Broadcast workspaces to all connected clients
+ */
+function broadcastWorkspaces(): void {
+  broadcast({
+    type: 'workspaces',
+    payload: workspaceManager.getWorkspaces(),
   })
 }
 
@@ -1455,7 +1649,7 @@ function saveTiles(): void {
     const data = Array.from(textTiles.values())
     writeFileSync(TILES_FILE, JSON.stringify(data, null, 2))
     debug(`Saved ${textTiles.size} tiles to ${TILES_FILE}`)
-  } catch (e) {
+  } catch {
     console.error('Failed to save tiles:', e)
   }
 }
@@ -1478,7 +1672,7 @@ function loadTiles(): void {
     }
 
     log(`Loaded ${textTiles.size} tiles from ${TILES_FILE}`)
-  } catch (e) {
+  } catch {
     console.error('Failed to load tiles:', e)
   }
 }
@@ -1502,7 +1696,9 @@ function broadcastTiles(): void {
  */
 function startVoiceSession(ws: WebSocket): boolean {
   if (!deepgramApiKey) {
-    ws.send(JSON.stringify({ type: 'voice_error', payload: { error: 'Voice input not configured' } }))
+    ws.send(
+      JSON.stringify({ type: 'voice_error', payload: { error: 'Voice input not configured' } })
+    )
     return false
   }
 
@@ -1529,10 +1725,12 @@ function startVoiceSession(ws: WebSocket): boolean {
     connection.on(LiveTranscriptionEvents.Transcript, (data) => {
       const transcript = data.channel?.alternatives?.[0]?.transcript
       if (transcript) {
-        ws.send(JSON.stringify({
-          type: 'voice_transcript',
-          payload: { transcript, isFinal: data.is_final }
-        }))
+        ws.send(
+          JSON.stringify({
+            type: 'voice_transcript',
+            payload: { transcript, isFinal: data.is_final },
+          })
+        )
       }
     })
 
@@ -1552,7 +1750,7 @@ function startVoiceSession(ws: WebSocket): boolean {
     voiceSessions.set(ws, connection)
     debug('Voice session started')
     return true
-  } catch (e) {
+  } catch {
     log(`Failed to start voice session: ${e}`)
     ws.send(JSON.stringify({ type: 'voice_error', payload: { error: String(e) } }))
     return false
@@ -1567,7 +1765,7 @@ function stopVoiceSession(ws: WebSocket): void {
   if (connection) {
     try {
       connection.requestClose()
-    } catch (e) {
+    } catch {
       // Ignore close errors
     }
     voiceSessions.delete(ws)
@@ -1589,7 +1787,7 @@ function sendVoiceAudio(ws: WebSocket, audioData: Buffer): void {
       audioData.byteOffset + audioData.byteLength
     )
     connection.send(arrayBuffer)
-  } catch (e) {
+  } catch {
     debug(`Error sending audio: ${e}`)
   }
 }
@@ -1616,12 +1814,40 @@ function findManagedSession(claudeSessionId: string): ManagedSession | undefined
 // Event Processing
 // ============================================================================
 
+/** Maps toolUseId to changeId for file change tracking */
+const pendingFileChanges = new Map<string, string>()
+
+/** File-modifying tools that should be tracked for rollback */
+const FILE_MODIFYING_TOOLS = ['Edit', 'Write', 'NotebookEdit']
+
 function processEvent(event: ClaudeEvent): ClaudeEvent {
   // Track pre_tool_use for duration calculation
   if (event.type === 'pre_tool_use') {
     const preEvent = event as PreToolUseEvent
     pendingToolUses.set(preEvent.toolUseId, preEvent)
     debug(`Tracking tool use: ${preEvent.tool} (${preEvent.toolUseId})`)
+
+    // Track file changes for Edit/Write tools
+    if (FILE_MODIFYING_TOOLS.includes(preEvent.tool)) {
+      const toolInput = preEvent.toolInput as Record<string, string> | undefined
+      const filePath = toolInput?.file_path || toolInput?.notebook_path
+      if (filePath) {
+        try {
+          const managedSession = findManagedSession(preEvent.sessionId)
+          const changeId = changeTracker.recordBefore({
+            sessionId: managedSession?.id || preEvent.sessionId,
+            claudeSessionId: preEvent.sessionId,
+            toolUseId: preEvent.toolUseId,
+            tool: preEvent.tool,
+            path: filePath,
+          })
+          pendingFileChanges.set(preEvent.toolUseId, changeId)
+          debug(`Tracking file change: ${filePath} (changeId: ${changeId})`)
+        } catch {
+          debug(`Failed to track file change for ${filePath}: ${e}`)
+        }
+      }
+    }
   }
 
   // Calculate duration for post_tool_use
@@ -1632,6 +1858,23 @@ function processEvent(event: ClaudeEvent): ClaudeEvent {
       postEvent.duration = postEvent.timestamp - preEvent.timestamp
       pendingToolUses.delete(postEvent.toolUseId)
       debug(`Tool ${postEvent.tool} took ${postEvent.duration}ms`)
+    }
+
+    // Complete file change tracking for Edit/Write tools
+    const changeId = pendingFileChanges.get(postEvent.toolUseId)
+    if (changeId) {
+      // Generate description from the event
+      const preEventForDesc = preEvent || pendingToolUses.get(postEvent.toolUseId)
+      let description = `${postEvent.tool} tool`
+      const toolInputForDesc = preEventForDesc?.toolInput as Record<string, string> | undefined
+      if (toolInputForDesc?.file_path) {
+        const fileName = toolInputForDesc.file_path.split('/').pop()
+        description = `${postEvent.tool}: ${fileName}`
+      }
+
+      changeTracker.recordAfter(changeId, description)
+      pendingFileChanges.delete(postEvent.toolUseId)
+      debug(`Completed file change tracking: ${changeId}`)
     }
   }
 
@@ -1650,7 +1893,7 @@ function addEvent(event: ClaudeEvent) {
   if (seenEventIds.size > MAX_EVENTS * 2) {
     const idsToKeep = [...seenEventIds].slice(-MAX_EVENTS)
     seenEventIds.clear()
-    idsToKeep.forEach(id => seenEventIds.add(id))
+    idsToKeep.forEach((id) => seenEventIds.add(id))
   }
 
   const processed = processEvent(event)
@@ -1723,7 +1966,7 @@ function loadEventsFromFile() {
       const event = JSON.parse(line) as ClaudeEvent
       processEvent(event)
       events.push(event)
-    } catch (e) {
+    } catch {
       debug(`Failed to parse event line: ${line}`)
     }
   }
@@ -1764,14 +2007,14 @@ function watchEventsFile() {
             const event = JSON.parse(line) as ClaudeEvent
             addEvent(event)
             debug(`New event from file: ${event.type}`)
-          } catch (e) {
+          } catch {
             debug(`Failed to parse new event: ${line}`)
           }
         }
 
         lastFileSize = content.length
       }
-    } catch (e) {
+    } catch {
       debug(`Error reading events file: ${e}`)
     }
   })
@@ -1861,9 +2104,38 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
     opencodeManager,
     managedSessions,
     opencodeSessions,
-    createOpenCodeSession: (options) => createOpenCodeSession(options, { managedSessions, opencodeSessions, opencodeManager, gitStatusManager, projectsManager, addEvent, broadcastSessions, saveSessions, log, debug }),
-    deleteOpenCodeSession: (id) => deleteOpenCodeSession(id, { managedSessions, opencodeSessions, opencodeManager, gitStatusManager, log, broadcastSessions, saveSessions }),
-    restartOpenCodeSession: (id) => restartOpenCodeSession(id, { managedSessions, opencodeSessions, opencodeManager, log, broadcastSessions, saveSessions }),
+    createOpenCodeSession: (options) =>
+      createOpenCodeSession(options, {
+        managedSessions,
+        opencodeSessions,
+        opencodeManager,
+        gitStatusManager,
+        projectsManager,
+        addEvent,
+        broadcastSessions,
+        saveSessions,
+        log,
+        debug,
+      }),
+    deleteOpenCodeSession: (id) =>
+      deleteOpenCodeSession(id, {
+        managedSessions,
+        opencodeSessions,
+        opencodeManager,
+        gitStatusManager,
+        log,
+        broadcastSessions,
+        saveSessions,
+      }),
+    restartOpenCodeSession: (id) =>
+      restartOpenCodeSession(id, {
+        managedSessions,
+        opencodeSessions,
+        opencodeManager,
+        log,
+        broadcastSessions,
+        saveSessions,
+      }),
     debug,
   })
 
@@ -1873,35 +2145,39 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
   }
 
   if (req.method === 'POST' && req.url === '/event') {
-    collectRequestBody(req).then(body => {
-      try {
-        const event = JSON.parse(body) as ClaudeEvent
-        addEvent(event)
-        debug(`Received event via HTTP: ${event.type}`)
-        res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ ok: true }))
-      } catch (e) {
-        debug(`Failed to parse HTTP event: ${e}`)
-        res.writeHead(400, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ error: 'Invalid JSON' }))
-      }
-    }).catch(() => {
-      res.writeHead(413, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ error: 'Request body too large' }))
-    })
+    collectRequestBody(req)
+      .then((body) => {
+        try {
+          const event = JSON.parse(body) as ClaudeEvent
+          addEvent(event)
+          debug(`Received event via HTTP: ${event.type}`)
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: true }))
+        } catch {
+          debug(`Failed to parse HTTP event: ${e}`)
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Invalid JSON' }))
+        }
+      })
+      .catch(() => {
+        res.writeHead(413, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Request body too large' }))
+      })
     return
   }
 
   // Health check
   if (req.method === 'GET' && req.url === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' })
-    res.end(JSON.stringify({
-      ok: true,
-      version: VERSION,
-      clients: clients.size,
-      events: events.length,
-      voiceEnabled: !!deepgramApiKey,
-    }))
+    res.end(
+      JSON.stringify({
+        ok: true,
+        version: VERSION,
+        clients: clients.size,
+        events: events.length,
+        voiceEnabled: !!deepgramApiKey,
+      })
+    )
     return
   }
 
@@ -1910,11 +2186,13 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
     const username = process.env.USER || process.env.USERNAME || 'claude-user'
     const host = hostname()
     res.writeHead(200, { 'Content-Type': 'application/json' })
-    res.end(JSON.stringify({
-      username,
-      hostname: host,
-      tmuxSession: TMUX_SESSION,
-    }))
+    res.end(
+      JSON.stringify({
+        username,
+        hostname: host,
+        tmuxSession: TMUX_SESSION,
+      })
+    )
     return
   }
 
@@ -1936,9 +2214,7 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
 
     const avgDurations: Record<string, number> = {}
     for (const [tool, durations] of Object.entries(toolDurations)) {
-      avgDurations[tool] = Math.round(
-        durations.reduce((a, b) => a + b, 0) / durations.length
-      )
+      avgDurations[tool] = Math.round(durations.reduce((a, b) => a + b, 0) / durations.length)
     }
 
     // Collect token data
@@ -1948,12 +2224,14 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
     }
 
     res.writeHead(200, { 'Content-Type': 'application/json' })
-    res.end(JSON.stringify({
-      totalEvents: events.length,
-      toolCounts,
-      avgDurations,
-      tokens,
-    }))
+    res.end(
+      JSON.stringify({
+        totalEvents: events.length,
+        toolCounts,
+        avgDurations,
+        tokens,
+      })
+    )
     return
   }
 
@@ -1966,56 +2244,60 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
 
   // Submit prompt from browser
   if (req.method === 'POST' && req.url === '/prompt') {
-    collectRequestBody(req).then(body => {
-      try {
-        const { prompt, send } = JSON.parse(body) as { prompt: string; send?: boolean }
-        if (!prompt || typeof prompt !== 'string') {
+    collectRequestBody(req)
+      .then((body) => {
+        try {
+          const { prompt, send } = JSON.parse(body) as { prompt: string; send?: boolean }
+          if (!prompt || typeof prompt !== 'string') {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ error: 'Prompt is required' }))
+            return
+          }
+
+          // Write prompt to file
+          const dir = dirname(PENDING_PROMPT_FILE)
+          if (!existsSync(dir)) {
+            mkdirSync(dir, { recursive: true })
+          }
+          writeFileSync(PENDING_PROMPT_FILE, prompt, 'utf-8')
+          log(`Prompt saved: ${prompt.slice(0, 50)}...`)
+
+          // If send=true, inject into tmux session
+          if (send) {
+            // Use safe helper to prevent command injection
+            sendToTmuxSafe(TMUX_SESSION, prompt)
+              .then(() => {
+                log(`Prompt sent to tmux session: ${TMUX_SESSION}`)
+                res.writeHead(200, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ ok: true, saved: PENDING_PROMPT_FILE, sent: true }))
+              })
+              .catch((error) => {
+                log(`tmux send failed: ${error.message}`)
+                res.writeHead(200, { 'Content-Type': 'application/json' })
+                res.end(
+                  JSON.stringify({
+                    ok: true,
+                    saved: PENDING_PROMPT_FILE,
+                    sent: false,
+                    tmuxError: error.message,
+                  })
+                )
+              })
+            return
+          }
+
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: true, saved: PENDING_PROMPT_FILE }))
+        } catch {
+          debug(`Failed to save prompt: ${e}`)
           res.writeHead(400, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ error: 'Prompt is required' }))
-          return
+          res.end(JSON.stringify({ error: 'Invalid JSON' }))
         }
-
-        // Write prompt to file
-        const dir = dirname(PENDING_PROMPT_FILE)
-        if (!existsSync(dir)) {
-          mkdirSync(dir, { recursive: true })
-        }
-        writeFileSync(PENDING_PROMPT_FILE, prompt, 'utf-8')
-        log(`Prompt saved: ${prompt.slice(0, 50)}...`)
-
-        // If send=true, inject into tmux session
-        if (send) {
-          // Use safe helper to prevent command injection
-          sendToTmuxSafe(TMUX_SESSION, prompt)
-            .then(() => {
-              log(`Prompt sent to tmux session: ${TMUX_SESSION}`)
-              res.writeHead(200, { 'Content-Type': 'application/json' })
-              res.end(JSON.stringify({ ok: true, saved: PENDING_PROMPT_FILE, sent: true }))
-            })
-            .catch((error) => {
-              log(`tmux send failed: ${error.message}`)
-              res.writeHead(200, { 'Content-Type': 'application/json' })
-              res.end(JSON.stringify({
-                ok: true,
-                saved: PENDING_PROMPT_FILE,
-                sent: false,
-                tmuxError: error.message
-              }))
-            })
-          return
-        }
-
-        res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ ok: true, saved: PENDING_PROMPT_FILE }))
-      } catch (e) {
-        debug(`Failed to save prompt: ${e}`)
-        res.writeHead(400, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ error: 'Invalid JSON' }))
-      }
-    }).catch(() => {
-      res.writeHead(413, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ error: 'Request body too large' }))
-    })
+      })
+      .catch(() => {
+        res.writeHead(413, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Request body too large' }))
+      })
     return
   }
 
@@ -2054,15 +2336,20 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
     }
 
     // Capture last 100 lines from tmux pane
-    execFile('tmux', ['capture-pane', '-t', TMUX_SESSION, '-p', '-S', '-100'], { ...EXEC_OPTIONS, maxBuffer: 1024 * 1024 }, (error, stdout) => {
-      if (error) {
+    execFile(
+      'tmux',
+      ['capture-pane', '-t', TMUX_SESSION, '-p', '-S', '-100'],
+      { ...EXEC_OPTIONS, maxBuffer: 1024 * 1024 },
+      (error, stdout) => {
+        if (error) {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: error.message, output: '' }))
+          return
+        }
         res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ ok: false, error: error.message, output: '' }))
-        return
+        res.end(JSON.stringify({ ok: true, output: stdout }))
       }
-      res.writeHead(200, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ ok: true, output: stdout }))
-    })
+    )
     return
   }
 
@@ -2109,24 +2396,26 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
 
   // Update server config
   if (req.method === 'PATCH' && req.url === '/config') {
-    collectRequestBody(req).then(body => {
-      try {
-        const data = body ? JSON.parse(body) : {}
-        if (typeof data.cliCommand === 'string' && data.cliCommand.trim()) {
-          claudeCommand = data.cliCommand.trim()
-          log(`CLI command updated to: ${claudeCommand}`)
-          saveConfig()
+    collectRequestBody(req)
+      .then((body) => {
+        try {
+          const data = body ? JSON.parse(body) : {}
+          if (typeof data.cliCommand === 'string' && data.cliCommand.trim()) {
+            claudeCommand = data.cliCommand.trim()
+            log(`CLI command updated to: ${claudeCommand}`)
+            saveConfig()
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: true, cliCommand: claudeCommand }))
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: 'Invalid JSON' }))
         }
-        res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ ok: true, cliCommand: claudeCommand }))
-      } catch (e) {
-        res.writeHead(400, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ ok: false, error: 'Invalid JSON' }))
-      }
-    }).catch(() => {
-      res.writeHead(413, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ ok: false, error: 'Request body too large' }))
-    })
+      })
+      .catch(() => {
+        res.writeHead(413, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: 'Request body too large' }))
+      })
     return
   }
 
@@ -2149,49 +2438,53 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
 
   // Create an implicit session (external Claude, no tmux control)
   if (req.method === 'POST' && req.url === '/sessions/implicit') {
-    collectRequestBody(req).then(body => {
-      try {
-        if (!body) {
-          res.writeHead(400, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ ok: false, error: 'Request body required' }))
-          return
+    collectRequestBody(req)
+      .then((body) => {
+        try {
+          if (!body) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ ok: false, error: 'Request body required' }))
+            return
+          }
+          const options = JSON.parse(body) as CreateImplicitSessionRequest
+          if (!options.claudeSessionId) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ ok: false, error: 'claudeSessionId is required' }))
+            return
+          }
+          const session = createImplicitSession(options)
+          res.writeHead(201, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: true, session }))
+        } catch {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: (e as Error).message }))
         }
-        const options = JSON.parse(body) as CreateImplicitSessionRequest
-        if (!options.claudeSessionId) {
-          res.writeHead(400, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ ok: false, error: 'claudeSessionId is required' }))
-          return
-        }
-        const session = createImplicitSession(options)
-        res.writeHead(201, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ ok: true, session }))
-      } catch (e) {
-        res.writeHead(500, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ ok: false, error: (e as Error).message }))
-      }
-    }).catch(() => {
-      res.writeHead(413, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ error: 'Request body too large' }))
-    })
+      })
+      .catch(() => {
+        res.writeHead(413, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Request body too large' }))
+      })
     return
   }
 
   // Create a new session
   if (req.method === 'POST' && req.url === '/sessions') {
-    collectRequestBody(req).then(async body => {
-      try {
-        const options = body ? JSON.parse(body) as CreateSessionRequest : {}
-        const session = await createSession(options)
-        res.writeHead(201, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ ok: true, session }))
-      } catch (e) {
-        res.writeHead(500, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ ok: false, error: (e as Error).message }))
-      }
-    }).catch(() => {
-      res.writeHead(413, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ error: 'Request body too large' }))
-    })
+    collectRequestBody(req)
+      .then(async (body) => {
+        try {
+          const options = body ? (JSON.parse(body) as CreateSessionRequest) : {}
+          const session = await createSession(options)
+          res.writeHead(201, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: true, session }))
+        } catch {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: (e as Error).message }))
+        }
+      })
+      .catch(() => {
+        res.writeHead(413, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Request body too large' }))
+      })
     return
   }
 
@@ -2225,6 +2518,427 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
     return
   }
 
+  // ============================================================================
+  // Workspace & Project Organization API
+  // ============================================================================
+
+  // List all workspaces
+  if (req.method === 'GET' && req.url === '/api/workspaces') {
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ ok: true, workspaces: workspaceManager.getWorkspaces() }))
+    return
+  }
+
+  // Create a workspace
+  if (req.method === 'POST' && req.url === '/api/workspaces') {
+    collectRequestBody(req)
+      .then((body) => {
+        try {
+          const request = JSON.parse(body) as CreateWorkspaceRequest
+          if (!request.name) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ ok: false, error: 'Name is required' }))
+            return
+          }
+          const workspace = workspaceManager.createWorkspace(request)
+          res.writeHead(201, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: true, workspace }))
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: 'Invalid JSON' }))
+        }
+      })
+      .catch(() => {
+        res.writeHead(413, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Request body too large' }))
+      })
+    return
+  }
+
+  // Workspace-specific endpoints: /api/workspaces/:id
+  const workspaceMatch = req.url?.match(/^\/api\/workspaces\/([a-f0-9-]+)(?:\/(.+))?$/)
+  if (workspaceMatch) {
+    const workspaceId = workspaceMatch[1]
+    const action = workspaceMatch[2]
+
+    // GET /api/workspaces/:id - Get workspace details
+    if (req.method === 'GET' && !action) {
+      const workspace = workspaceManager.getWorkspace(workspaceId)
+      if (workspace) {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, workspace }))
+      } else {
+        res.writeHead(404, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: 'Workspace not found' }))
+      }
+      return
+    }
+
+    // PATCH /api/workspaces/:id - Update workspace
+    if (req.method === 'PATCH' && !action) {
+      collectRequestBody(req)
+        .then((body) => {
+          try {
+            const updates = JSON.parse(body) as UpdateWorkspaceRequest
+            const workspace = workspaceManager.updateWorkspace(workspaceId, updates)
+            if (workspace) {
+              res.writeHead(200, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ ok: true, workspace }))
+            } else {
+              res.writeHead(404, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ ok: false, error: 'Workspace not found' }))
+            }
+          } catch {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ ok: false, error: 'Invalid JSON' }))
+          }
+        })
+        .catch(() => {
+          res.writeHead(413, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Request body too large' }))
+        })
+      return
+    }
+
+    // DELETE /api/workspaces/:id - Delete workspace
+    if (req.method === 'DELETE' && !action) {
+      const deleted = workspaceManager.deleteWorkspace(workspaceId)
+      if (deleted) {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: true }))
+      } else {
+        res.writeHead(404, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: 'Workspace not found' }))
+      }
+      return
+    }
+
+    // GET /api/workspaces/:id/projects - Get projects in workspace
+    if (req.method === 'GET' && action === 'projects') {
+      const projects = workspaceManager.getProjectsInWorkspace(workspaceId)
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: true, projects }))
+      return
+    }
+
+    // POST /api/workspaces/:id/projects/:projectId - Add project to workspace
+    const projectActionMatch = action?.match(/^projects\/([a-f0-9-]+)$/)
+    if (req.method === 'POST' && projectActionMatch) {
+      const projectId = projectActionMatch[1]
+      const success = workspaceManager.addProjectToWorkspace(workspaceId, projectId)
+      res.writeHead(success ? 200 : 404, { 'Content-Type': 'application/json' })
+      res.end(
+        JSON.stringify({
+          ok: success,
+          error: success ? undefined : 'Workspace or project not found',
+        })
+      )
+      return
+    }
+
+    // DELETE /api/workspaces/:id/projects/:projectId - Remove project from workspace
+    if (req.method === 'DELETE' && projectActionMatch) {
+      const projectId = projectActionMatch[1]
+      const success = workspaceManager.removeProjectFromWorkspace(workspaceId, projectId)
+      res.writeHead(success ? 200 : 404, { 'Content-Type': 'application/json' })
+      res.end(
+        JSON.stringify({
+          ok: success,
+          error: success ? undefined : 'Workspace or project not found',
+        })
+      )
+      return
+    }
+  }
+
+  // List all discovered projects
+  if (req.method === 'GET' && req.url === '/api/projects') {
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ ok: true, projects: projectDiscovery.getProjects() }))
+    return
+  }
+
+  // Get ungrouped projects (not in any workspace)
+  if (req.method === 'GET' && req.url === '/api/projects/ungrouped') {
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ ok: true, projects: workspaceManager.getUngroupedProjects() }))
+    return
+  }
+
+  // Suggest workspaces based on project paths
+  if (req.method === 'GET' && req.url === '/api/projects/suggest-workspaces') {
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ ok: true, suggestions: workspaceManager.suggestWorkspaces() }))
+    return
+  }
+
+  // Register a project manually
+  if (req.method === 'POST' && req.url === '/api/projects') {
+    collectRequestBody(req)
+      .then(async (body) => {
+        try {
+          const request = JSON.parse(body) as CreateProjectRequest
+          if (!request.path) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ ok: false, error: 'Path is required' }))
+            return
+          }
+          const project = await projectDiscovery.registerProject(request.path)
+          if (request.workspaceId) {
+            workspaceManager.addProjectToWorkspace(request.workspaceId, project.id)
+          }
+          res.writeHead(201, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: true, project }))
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: (e as Error).message }))
+        }
+      })
+      .catch(() => {
+        res.writeHead(413, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Request body too large' }))
+      })
+    return
+  }
+
+  // Project-specific endpoints: /api/projects/:id
+  const projectMatch = req.url?.match(/^\/api\/projects\/([a-f0-9-]+)$/)
+  if (projectMatch) {
+    const projectId = projectMatch[1]
+
+    // GET /api/projects/:id - Get project details
+    if (req.method === 'GET') {
+      const project = projectDiscovery.getProject(projectId)
+      if (project) {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, project }))
+      } else {
+        res.writeHead(404, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: 'Project not found' }))
+      }
+      return
+    }
+  }
+
+  // ============================================================================
+  // Orchestrator API
+  // ============================================================================
+
+  // List available orchestrator plugins
+  if (req.method === 'GET' && req.url === '/api/orchestrator/plugins') {
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ ok: true, plugins: orchestratorManager.listPlugins() }))
+    return
+  }
+
+  // List workflow templates
+  if (req.method === 'GET' && req.url === '/api/orchestrator/workflows') {
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ ok: true, templates: orchestratorManager.getWorkflowTemplates() }))
+    return
+  }
+
+  // List orchestrated tasks
+  if (req.method === 'GET' && req.url?.startsWith('/api/orchestrator/tasks')) {
+    const url = new URL(req.url, `http://localhost:${PORT}`)
+    const filter: {
+      orchestratorType?: 'langgraph' | 'crewai' | 'autogen' | 'custom'
+      status?: string
+      projectId?: string
+    } = {}
+    const typeParam = url.searchParams.get('type')
+    if (typeParam)
+      filter.orchestratorType = typeParam as 'langgraph' | 'crewai' | 'autogen' | 'custom'
+    if (url.searchParams.get('status')) filter.status = url.searchParams.get('status')!
+    if (url.searchParams.get('projectId')) filter.projectId = url.searchParams.get('projectId')!
+
+    orchestratorManager.listTasks(filter).then((result) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify(result))
+    })
+    return
+  }
+
+  // Submit new orchestrated task
+  if (req.method === 'POST' && req.url === '/api/orchestrator/tasks') {
+    collectRequestBody(req)
+      .then(async (body) => {
+        try {
+          const request = JSON.parse(body) as OrchestratorTaskRequest
+          if (!request.description) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ ok: false, error: 'Description is required' }))
+            return
+          }
+          const result = await orchestratorManager.submitTask(request)
+          res.writeHead(result.ok ? 201 : 400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify(result))
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: (e as Error).message }))
+        }
+      })
+      .catch(() => {
+        res.writeHead(413, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Request body too large' }))
+      })
+    return
+  }
+
+  // Task-specific endpoints: /api/orchestrator/tasks/:id
+  const taskMatch = req.url?.match(/^\/api\/orchestrator\/tasks\/([a-f0-9-]+)(?:\/(.+))?$/)
+  if (taskMatch) {
+    const taskId = taskMatch[1]
+    const action = taskMatch[2]
+
+    // GET /api/orchestrator/tasks/:id - Get task status
+    if (req.method === 'GET' && !action) {
+      orchestratorManager.getTaskStatus(taskId).then((result) => {
+        if (result.ok) {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify(result))
+        } else {
+          res.writeHead(404, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify(result))
+        }
+      })
+      return
+    }
+
+    // POST /api/orchestrator/tasks/:id/cancel - Cancel task
+    if (req.method === 'POST' && action === 'cancel') {
+      orchestratorManager.cancelTask(taskId).then((result) => {
+        res.writeHead(result.ok ? 200 : 404, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify(result))
+      })
+      return
+    }
+  }
+
+  // ==========================================================================
+  // File Changes / Rollback API
+  // ==========================================================================
+
+  // GET /api/changes - Get recent file changes
+  if (req.method === 'GET' && req.url === '/api/changes') {
+    const changes = changeTracker.getRecentChanges(50)
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ ok: true, changes }))
+    return
+  }
+
+  // GET /api/changes/session/:id - Get changes for a session
+  const changesSessionMatch = req.url?.match(/^\/api\/changes\/session\/([a-f0-9-]+)$/)
+  if (req.method === 'GET' && changesSessionMatch) {
+    const sessionId = changesSessionMatch[1]
+    const changes = changeTracker.getChangesForSession(sessionId)
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ ok: true, changes }))
+    return
+  }
+
+  // GET /api/changes/:id - Get a specific change
+  const changeMatch = req.url?.match(/^\/api\/changes\/([a-f0-9-]+)$/)
+  if (req.method === 'GET' && changeMatch) {
+    const changeId = changeMatch[1]
+    const change = changeTracker.getChange(changeId)
+    if (change) {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: true, change }))
+    } else {
+      res.writeHead(404, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: false, error: 'Change not found' }))
+    }
+    return
+  }
+
+  // POST /api/changes/:id/rollback - Rollback a change
+  const rollbackMatch = req.url?.match(/^\/api\/changes\/([a-f0-9-]+)\/rollback$/)
+  if (req.method === 'POST' && rollbackMatch) {
+    const changeId = rollbackMatch[1]
+    const result = changeTracker.rollback(changeId)
+    if (result.success) {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: true, changeId }))
+      log(`File change rolled back: ${changeId}`)
+    } else {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: false, error: result.error }))
+    }
+    return
+  }
+
+  // GET /api/changes/stats - Get change statistics
+  if (req.method === 'GET' && req.url === '/api/changes/stats') {
+    const stats = changeTracker.getStats()
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ ok: true, stats }))
+    return
+  }
+
+  // ==========================================================================
+  // Google Jules API
+  // ==========================================================================
+
+  // GET /api/jules/status - Check if Jules CLI is installed
+  if (req.method === 'GET' && req.url === '/api/jules/status') {
+    julesService.checkInstalled().then((installed) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: true, installed }))
+    })
+    return
+  }
+
+  // GET /api/jules/tasks - Get all Jules tasks
+  if (req.method === 'GET' && req.url === '/api/jules/tasks') {
+    const tasks = julesService.getTasks()
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ ok: true, tasks }))
+    return
+  }
+
+  // POST /api/jules/tasks - Create a new Jules task
+  if (req.method === 'POST' && req.url === '/api/jules/tasks') {
+    collectRequestBody(req)
+      .then(async (body) => {
+        try {
+          const { repo, description } = JSON.parse(body)
+          if (!description) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ ok: false, error: 'Description required' }))
+            return
+          }
+
+          const result = await julesService.createTask(repo || '', description)
+          res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify(result))
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: 'Invalid JSON' }))
+        }
+      })
+      .catch(() => {
+        res.writeHead(413, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Request body too large' }))
+      })
+    return
+  }
+
+  // GET /api/jules/tasks/:id - Get a specific Jules task
+  const julesTaskMatch = req.url?.match(/^\/api\/jules\/tasks\/(\d+)$/)
+  if (req.method === 'GET' && julesTaskMatch) {
+    const sessionId = julesTaskMatch[1]
+    const task = julesService.getTask(sessionId)
+    if (task) {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: true, task }))
+    } else {
+      res.writeHead(404, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: false, error: 'Task not found' }))
+    }
+    return
+  }
+
   // Session-specific endpoints: /sessions/:id
   const sessionMatch = req.url?.match(/^\/sessions\/([a-f0-9-]+)(?:\/(.+))?$/)
   if (sessionMatch) {
@@ -2246,25 +2960,27 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
 
     // PATCH /sessions/:id - Update session (rename)
     if (req.method === 'PATCH' && !action) {
-      collectRequestBody(req).then(body => {
-        try {
-          const updates = JSON.parse(body) as UpdateSessionRequest
-          const session = updateSession(sessionId, updates)
-          if (session) {
-            res.writeHead(200, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ ok: true, session }))
-          } else {
-            res.writeHead(404, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ ok: false, error: 'Session not found' }))
+      collectRequestBody(req)
+        .then((body) => {
+          try {
+            const updates = JSON.parse(body) as UpdateSessionRequest
+            const session = updateSession(sessionId, updates)
+            if (session) {
+              res.writeHead(200, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ ok: true, session }))
+            } else {
+              res.writeHead(404, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ ok: false, error: 'Session not found' }))
+            }
+          } catch {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ ok: false, error: 'Invalid JSON' }))
           }
-        } catch (e) {
-          res.writeHead(400, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ ok: false, error: 'Invalid JSON' }))
-        }
-      }).catch(() => {
-        res.writeHead(413, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ error: 'Request body too large' }))
-      })
+        })
+        .catch(() => {
+          res.writeHead(413, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Request body too large' }))
+        })
       return
     }
 
@@ -2284,25 +3000,27 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
 
     // POST /sessions/:id/prompt - Send prompt to specific session
     if (req.method === 'POST' && action === 'prompt') {
-      collectRequestBody(req).then(async body => {
-        try {
-          const { prompt } = JSON.parse(body) as SessionPromptRequest
-          if (!prompt) {
+      collectRequestBody(req)
+        .then(async (body) => {
+          try {
+            const { prompt } = JSON.parse(body) as SessionPromptRequest
+            if (!prompt) {
+              res.writeHead(400, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ ok: false, error: 'Prompt is required' }))
+              return
+            }
+            const result = await sendPromptToSession(sessionId, prompt)
+            res.writeHead(result.ok ? 200 : 404, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify(result))
+          } catch {
             res.writeHead(400, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ ok: false, error: 'Prompt is required' }))
-            return
+            res.end(JSON.stringify({ ok: false, error: 'Invalid JSON' }))
           }
-          const result = await sendPromptToSession(sessionId, prompt)
-          res.writeHead(result.ok ? 200 : 404, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify(result))
-        } catch (e) {
-          res.writeHead(400, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ ok: false, error: 'Invalid JSON' }))
-        }
-      }).catch(() => {
-        res.writeHead(413, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ error: 'Request body too large' }))
-      })
+        })
+        .catch(() => {
+          res.writeHead(413, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Request body too large' }))
+        })
       return
     }
 
@@ -2356,26 +3074,28 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
         return
       }
 
-      collectRequestBody(req).then(body => {
-        try {
-          const { response } = JSON.parse(body) as { response: string }
-          if (!response) {
-            res.writeHead(400, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ ok: false, error: 'Missing response field' }))
-            return
-          }
+      collectRequestBody(req)
+        .then((body) => {
+          try {
+            const { response } = JSON.parse(body) as { response: string }
+            if (!response) {
+              res.writeHead(400, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ ok: false, error: 'Missing response field' }))
+              return
+            }
 
-          sendPermissionResponse(sessionId, response)
-          res.writeHead(200, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ ok: true }))
-        } catch (e) {
-          res.writeHead(400, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ ok: false, error: 'Invalid JSON' }))
-        }
-      }).catch(() => {
-        res.writeHead(413, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ error: 'Request body too large' }))
-      })
+            sendPermissionResponse(sessionId, response)
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ ok: true }))
+          } catch {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ ok: false, error: 'Invalid JSON' }))
+          }
+        })
+        .catch(() => {
+          res.writeHead(413, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Request body too large' }))
+        })
       return
     }
 
@@ -2389,7 +3109,14 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
       }
 
       if (session.sessionType === 'opencode') {
-        restartOpenCodeSession(sessionId, { managedSessions, opencodeSessions, opencodeManager, log, broadcastSessions, saveSessions }).then(result => {
+        restartOpenCodeSession(sessionId, {
+          managedSessions,
+          opencodeSessions,
+          opencodeManager,
+          log,
+          broadcastSessions,
+          saveSessions,
+        }).then((result) => {
           res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify(result))
         })
@@ -2416,7 +3143,12 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
         cwd = validateDirectoryPath(session.cwd || process.cwd())
       } catch (err) {
         res.writeHead(400, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ ok: false, error: `Invalid directory: ${err instanceof Error ? err.message : err}` }))
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: `Invalid directory: ${err instanceof Error ? err.message : err}`,
+          })
+        )
         return
       }
 
@@ -2426,74 +3158,83 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
       execFile('tmux', ['kill-session', '-t', tmuxSession], EXEC_OPTIONS, () => {
         // Respawn tmux session with claude using execFile
         // NOTE: Must wrap in bash -c to ensure PATH is properly exported.
-        execFile('tmux', [
-          'new-session',
-          '-d',
-          '-s', tmuxSession,
-          '-c', cwd,
-          `bash -c 'export PATH="${EXEC_PATH}"; ${claudeCommand} -c --permission-mode=bypassPermissions --dangerously-skip-permissions'`
-        ], EXEC_OPTIONS, (error: Error | null) => {
-          if (error) {
-            res.writeHead(500, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ ok: false, error: `Failed to restart: ${error.message}` }))
-            return
-          }
-
-          // Update session state
-          session.status = 'idle'
-          session.lastActivity = Date.now()
-          session.claudeSessionId = undefined // Will be re-linked when events come in
-          session.currentTool = undefined
-
-          // Clear old linking
-          for (const [claudeId, managedId] of claudeToManagedMap) {
-            if (managedId === session.id) {
-              claudeToManagedMap.delete(claudeId)
+        execFile(
+          'tmux',
+          [
+            'new-session',
+            '-d',
+            '-s',
+            tmuxSession,
+            '-c',
+            cwd,
+            `bash -c 'export PATH="${EXEC_PATH}"; ${claudeCommand} -c --permission-mode=bypassPermissions --dangerously-skip-permissions'`,
+          ],
+          EXEC_OPTIONS,
+          (error: Error | null) => {
+            if (error) {
+              res.writeHead(500, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ ok: false, error: `Failed to restart: ${error.message}` }))
+              return
             }
+
+            // Update session state
+            session.status = 'idle'
+            session.lastActivity = Date.now()
+            session.claudeSessionId = undefined // Will be re-linked when events come in
+            session.currentTool = undefined
+
+            // Clear old linking
+            for (const [claudeId, managedId] of claudeToManagedMap) {
+              if (managedId === session.id) {
+                claudeToManagedMap.delete(claudeId)
+              }
+            }
+
+            log(`Restarted session: ${session.name} (${session.id.slice(0, 8)})`)
+            broadcastSessions()
+            saveSessions()
+
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ ok: true, session }))
           }
-
-          log(`Restarted session: ${session.name} (${session.id.slice(0, 8)})`)
-          broadcastSessions()
-          saveSessions()
-
-          res.writeHead(200, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ ok: true, session }))
-        })
+        )
       })
       return
     }
 
     // POST /sessions/:id/link - Link Claude session ID to managed session
     if (req.method === 'POST' && action === 'link') {
-      collectRequestBody(req).then(body => {
-        try {
-          const { claudeSessionId } = JSON.parse(body) as { claudeSessionId: string }
-          if (!claudeSessionId) {
+      collectRequestBody(req)
+        .then((body) => {
+          try {
+            const { claudeSessionId } = JSON.parse(body) as { claudeSessionId: string }
+            if (!claudeSessionId) {
+              res.writeHead(400, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ ok: false, error: 'claudeSessionId is required' }))
+              return
+            }
+            const session = getSession(sessionId)
+            if (!session) {
+              res.writeHead(404, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ ok: false, error: 'Session not found' }))
+              return
+            }
+            linkClaudeSession(claudeSessionId, sessionId)
+            session.claudeSessionId = claudeSessionId
+            log(`Linked Claude session ${claudeSessionId.slice(0, 8)} to ${session.name}`)
+            broadcastSessions()
+            saveSessions()
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ ok: true, session }))
+          } catch {
             res.writeHead(400, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ ok: false, error: 'claudeSessionId is required' }))
-            return
+            res.end(JSON.stringify({ ok: false, error: 'Invalid JSON' }))
           }
-          const session = getSession(sessionId)
-          if (!session) {
-            res.writeHead(404, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ ok: false, error: 'Session not found' }))
-            return
-          }
-          linkClaudeSession(claudeSessionId, sessionId)
-          session.claudeSessionId = claudeSessionId
-          log(`Linked Claude session ${claudeSessionId.slice(0, 8)} to ${session.name}`)
-          broadcastSessions()
-          saveSessions()
-          res.writeHead(200, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ ok: true, session }))
-        } catch (e) {
-          res.writeHead(400, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ ok: false, error: 'Invalid JSON' }))
-        }
-      }).catch(() => {
-        res.writeHead(413, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ error: 'Request body too large' }))
-      })
+        })
+        .catch(() => {
+          res.writeHead(413, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Request body too large' }))
+        })
       return
     }
   }
@@ -2511,39 +3252,41 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
 
   // POST /tiles - Create a new text tile
   if (req.method === 'POST' && req.url === '/tiles') {
-    collectRequestBody(req).then(body => {
-      try {
-        const data = JSON.parse(body) as CreateTextTileRequest
+    collectRequestBody(req)
+      .then((body) => {
+        try {
+          const data = JSON.parse(body) as CreateTextTileRequest
 
-        if (!data.text || !data.position) {
+          if (!data.text || !data.position) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ ok: false, error: 'Missing text or position' }))
+            return
+          }
+
+          const tile: TextTile = {
+            id: crypto.randomUUID(),
+            text: data.text,
+            position: data.position,
+            color: data.color,
+            createdAt: Date.now(),
+          }
+
+          textTiles.set(tile.id, tile)
+          saveTiles()
+          broadcastTiles()
+
+          log(`Created text tile: "${tile.text}" at (${tile.position.q}, ${tile.position.r})`)
+          res.writeHead(201, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: true, tile }))
+        } catch {
           res.writeHead(400, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ ok: false, error: 'Missing text or position' }))
-          return
+          res.end(JSON.stringify({ ok: false, error: 'Invalid JSON' }))
         }
-
-        const tile: TextTile = {
-          id: crypto.randomUUID(),
-          text: data.text,
-          position: data.position,
-          color: data.color,
-          createdAt: Date.now(),
-        }
-
-        textTiles.set(tile.id, tile)
-        saveTiles()
-        broadcastTiles()
-
-        log(`Created text tile: "${tile.text}" at (${tile.position.q}, ${tile.position.r})`)
-        res.writeHead(201, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ ok: true, tile }))
-      } catch (e) {
-        res.writeHead(400, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ ok: false, error: 'Invalid JSON' }))
-      }
-    }).catch(() => {
-      res.writeHead(413, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ error: 'Request body too large' }))
-    })
+      })
+      .catch(() => {
+        res.writeHead(413, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Request body too large' }))
+      })
     return
   }
 
@@ -2561,28 +3304,30 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
         return
       }
 
-      collectRequestBody(req).then(body => {
-        try {
-          const data = JSON.parse(body) as UpdateTextTileRequest
+      collectRequestBody(req)
+        .then((body) => {
+          try {
+            const data = JSON.parse(body) as UpdateTextTileRequest
 
-          if (data.text !== undefined) tile.text = data.text
-          if (data.position !== undefined) tile.position = data.position
-          if (data.color !== undefined) tile.color = data.color
+            if (data.text !== undefined) tile.text = data.text
+            if (data.position !== undefined) tile.position = data.position
+            if (data.color !== undefined) tile.color = data.color
 
-          saveTiles()
-          broadcastTiles()
+            saveTiles()
+            broadcastTiles()
 
-          log(`Updated text tile: "${tile.text}"`)
-          res.writeHead(200, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ ok: true, tile }))
-        } catch (e) {
-          res.writeHead(400, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ ok: false, error: 'Invalid JSON' }))
-        }
-      }).catch(() => {
-        res.writeHead(413, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ error: 'Request body too large' }))
-      })
+            log(`Updated text tile: "${tile.text}"`)
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ ok: true, tile }))
+          } catch {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ ok: false, error: 'Invalid JSON' }))
+          }
+        })
+        .catch(() => {
+          res.writeHead(413, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Request body too large' }))
+        })
       return
     }
 
@@ -2681,7 +3426,7 @@ function serveStaticFile(req: IncomingMessage, res: ServerResponse): void {
 // Main
 // ============================================================================
 
-function main() {
+async function main() {
   log('Starting Vibecraft server...')
 
   // Load Deepgram API key for voice transcription
@@ -2703,12 +3448,45 @@ function main() {
   gitStatusManager.setUpdateHandler(({ sessionId, status }) => {
     const session = managedSessions.get(sessionId)
     if (session) {
-      debug(`Git status updated for ${session.name}: ${status.branch} +${status.linesAdded}/-${status.linesRemoved}`)
+      debug(
+        `Git status updated for ${session.name}: ${status.branch} +${status.linesAdded}/-${status.linesRemoved}`
+      )
       // Broadcast updated sessions to all clients
       broadcastSessions()
     }
   })
   gitStatusManager.start()
+
+  // Start project discovery and workspace manager
+  projectDiscovery.onProjectChange((project) => {
+    debug(`Project updated: ${project.name} (${project.path})`)
+    broadcastProjects()
+  })
+  projectDiscovery.onProjectRemove((projectId) => {
+    debug(`Project removed: ${projectId}`)
+    broadcastProjects()
+  })
+  await projectDiscovery.start()
+
+  workspaceManager.onWorkspaceChange((workspace) => {
+    debug(`Workspace updated: ${workspace.name}`)
+    broadcastWorkspaces()
+  })
+  workspaceManager.onWorkspaceRemove((workspaceId) => {
+    debug(`Workspace removed: ${workspaceId}`)
+    broadcastWorkspaces()
+  })
+  await workspaceManager.start()
+
+  // Initialize orchestrator system
+  orchestratorManager.registerPlugin(langGraphPlugin)
+  orchestratorManager.registerPlugin(crewAIPlugin)
+  orchestratorManager.registerPlugin(autoGenPlugin)
+  orchestratorManager.onTaskChange((task) => {
+    debug(`Orchestrator task updated: ${task.id} (${task.status})`)
+    broadcast({ type: 'orchestrator_task_update', payload: task })
+  })
+  await orchestratorManager.initialize()
 
   // Watch for new events
   watchEventsFile()
@@ -2752,6 +3530,20 @@ function main() {
     }
     ws.send(JSON.stringify(tilesMsg))
 
+    // Send workspaces
+    const workspacesMsg: ServerMessage = {
+      type: 'workspaces',
+      payload: workspaceManager.getWorkspaces(),
+    }
+    ws.send(JSON.stringify(workspacesMsg))
+
+    // Send projects
+    const projectsMsg: ServerMessage = {
+      type: 'projects',
+      payload: projectDiscovery.getProjects(),
+    }
+    ws.send(JSON.stringify(projectsMsg))
+
     // Send recent history from ALL sessions, not just managed ones.
     // This enables "external Claude" support: Claude instances started outside Vibecraft
     // (in a regular terminal) will have their events included, allowing the client to
@@ -2777,7 +3569,7 @@ function main() {
       try {
         const message = JSON.parse(data.toString()) as ClientMessage
         handleClientMessage(ws, message)
-      } catch (e) {
+      } catch {
         debug(`Failed to parse client message: ${e}`)
       }
     })
@@ -2817,11 +3609,21 @@ function main() {
     // Start session health checking (every 5 seconds)
     setInterval(checkSessionHealth, 5000)
 
+    // Start Jules service (async coding agent integration)
+    julesService.start().then((started) => {
+      if (started) {
+        log('Jules integration active (npm install -g @google/jules to use)')
+      }
+    })
+
     // Start working timeout checking (every 10 seconds)
     setInterval(checkWorkingTimeout, WORKING_CHECK_INTERVAL_MS)
 
     // Start OpenCode health checking (every 5 seconds)
-    setInterval(() => checkOpenCodeHealth({ managedSessions, opencodeManager, broadcastSessions }), 5000)
+    setInterval(
+      () => checkOpenCodeHealth({ managedSessions, opencodeManager, broadcastSessions }),
+      5000
+    )
 
     // Run initial health check to update session statuses
     checkSessionHealth()
