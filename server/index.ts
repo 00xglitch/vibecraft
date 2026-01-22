@@ -41,6 +41,7 @@ import type {
   CreateImplicitSessionRequest,
   UpdateSessionRequest,
   SessionPromptRequest,
+  SessionStatus,
   TextTile,
   CreateTextTileRequest,
   UpdateTextTileRequest,
@@ -111,7 +112,7 @@ function getPackageVersion(): string {
         return pkg.version || 'unknown'
       }
     }
-  } catch {
+  } catch (e) {
     // Ignore errors
   }
   return 'unknown'
@@ -201,7 +202,7 @@ function isOriginAllowed(origin: string | undefined): boolean {
     }
 
     return false
-  } catch {
+  } catch (e) {
     return false // Invalid URL format
   }
 }
@@ -288,7 +289,7 @@ async function isGitRepo(dir: string): Promise<boolean> {
   try {
     await execAsync(`git -C "${dir}" rev-parse --git-dir`)
     return true
-  } catch {
+  } catch (e) {
     return false
   }
 }
@@ -362,7 +363,7 @@ async function removeWorktree(
     try {
       await execAsync(`git -C "${originalRepo}" branch -D "${branchName}"`)
       log(`Deleted branch: ${branchName}`)
-    } catch {
+    } catch (e) {
       // Branch deletion is optional - might fail if it has unmerged changes
       log(`Could not delete branch ${branchName} (may have unmerged changes)`)
     }
@@ -374,7 +375,7 @@ async function removeWorktree(
         await execAsync(`rm -rf "${worktreePath}"`)
         log(`Manually cleaned up worktree directory: ${worktreePath}`)
       }
-    } catch {
+    } catch (e) {
       // Ignore cleanup errors
     }
   }
@@ -431,7 +432,7 @@ async function sendToTmuxSafe(tmuxSession: string, text: string): Promise<void> 
     // Clean up temp file
     try {
       unlinkSync(tempFile)
-    } catch {
+    } catch (e) {
       // Ignore cleanup errors
     }
   }
@@ -585,7 +586,7 @@ function parseTokensFromOutput(output: string): number | null {
 function pollTokens(tmuxSession: string): void {
   try {
     validateTmuxSession(tmuxSession)
-  } catch {
+  } catch (e) {
     debug(`Invalid tmux session for token polling: ${tmuxSession}`)
     return
   }
@@ -821,7 +822,7 @@ function detectBypassWarning(output: string): boolean {
 function pollPermissions(sessionId: string, tmuxSession: string): void {
   try {
     validateTmuxSession(tmuxSession)
-  } catch {
+  } catch (e) {
     debug(`Invalid tmux session for permission polling: ${tmuxSession}`)
     return
   }
@@ -956,7 +957,7 @@ function sendPermissionResponse(sessionId: string, optionNumber: string): boolea
   // Validate tmux session name
   try {
     validateTmuxSession(session.tmuxSession)
-  } catch {
+  } catch (e) {
     log(`Invalid tmux session name: ${session.tmuxSession}`)
     return false
   }
@@ -1007,7 +1008,7 @@ async function createSession(options: CreateSessionRequest = {}): Promise<Manage
   const tmuxSession = `vibecraft-${shortId()}`
 
   // Validate cwd to prevent command injection
-  const cwd = validateDirectoryPath(options.cwd || process.cwd())
+  let cwd = validateDirectoryPath(options.cwd || process.cwd())
 
   // Store original cwd for reference
   const originalCwd = cwd
@@ -1319,7 +1320,7 @@ async function deleteSession(id: string): Promise<boolean> {
     // Kill the tmux session using execFile to prevent shell injection
     try {
       validateTmuxSession(session.tmuxSession)
-    } catch {
+    } catch (e) {
       log(`Invalid tmux session name: ${session.tmuxSession}`)
       resolve(false)
       return
@@ -1511,7 +1512,7 @@ function saveSessions(): void {
     }
     writeFileSync(SESSIONS_FILE, JSON.stringify(data, null, 2))
     debug(`Saved ${managedSessions.size} sessions to ${SESSIONS_FILE}`)
-  } catch {
+  } catch (e) {
     console.error('Failed to save sessions:', e)
   }
 }
@@ -1560,7 +1561,7 @@ function loadSessions(): void {
     }
 
     log(`Loaded ${managedSessions.size} sessions from ${SESSIONS_FILE}`)
-  } catch {
+  } catch (e) {
     console.error('Failed to load sessions:', e)
   }
 }
@@ -1573,7 +1574,7 @@ function saveConfig(): void {
     const data = { cliCommand: claudeCommand }
     writeFileSync(CONFIG_FILE, JSON.stringify(data, null, 2))
     debug(`Saved config to ${CONFIG_FILE}`)
-  } catch {
+  } catch (e) {
     console.error('Failed to save config:', e)
   }
 }
@@ -1596,7 +1597,7 @@ function loadConfig(): void {
       claudeCommand = data.cliCommand
       log(`Loaded CLI command from config: ${claudeCommand}`)
     }
-  } catch {
+  } catch (e) {
     console.error('Failed to load config:', e)
   }
 }
@@ -1650,7 +1651,7 @@ function saveTiles(): void {
     const data = Array.from(textTiles.values())
     writeFileSync(TILES_FILE, JSON.stringify(data, null, 2))
     debug(`Saved ${textTiles.size} tiles to ${TILES_FILE}`)
-  } catch {
+  } catch (e) {
     console.error('Failed to save tiles:', e)
   }
 }
@@ -1673,7 +1674,7 @@ function loadTiles(): void {
     }
 
     log(`Loaded ${textTiles.size} tiles from ${TILES_FILE}`)
-  } catch {
+  } catch (e) {
     console.error('Failed to load tiles:', e)
   }
 }
@@ -1751,7 +1752,7 @@ function startVoiceSession(ws: WebSocket): boolean {
     voiceSessions.set(ws, connection)
     debug('Voice session started')
     return true
-  } catch {
+  } catch (e) {
     log(`Failed to start voice session: ${e}`)
     ws.send(JSON.stringify({ type: 'voice_error', payload: { error: String(e) } }))
     return false
@@ -1766,7 +1767,7 @@ function stopVoiceSession(ws: WebSocket): void {
   if (connection) {
     try {
       connection.requestClose()
-    } catch {
+    } catch (e) {
       // Ignore close errors
     }
     voiceSessions.delete(ws)
@@ -1788,7 +1789,7 @@ function sendVoiceAudio(ws: WebSocket, audioData: Buffer): void {
       audioData.byteOffset + audioData.byteLength
     )
     connection.send(arrayBuffer)
-  } catch {
+  } catch (e) {
     debug(`Error sending audio: ${e}`)
   }
 }
@@ -1844,7 +1845,7 @@ function processEvent(event: ClaudeEvent): ClaudeEvent {
           })
           pendingFileChanges.set(preEvent.toolUseId, changeId)
           debug(`Tracking file change: ${filePath} (changeId: ${changeId})`)
-        } catch {
+        } catch (e) {
           debug(`Failed to track file change for ${filePath}: ${e}`)
         }
       }
@@ -1967,7 +1968,7 @@ function loadEventsFromFile() {
       const event = JSON.parse(line) as ClaudeEvent
       processEvent(event)
       events.push(event)
-    } catch {
+    } catch (e) {
       debug(`Failed to parse event line: ${line}`)
     }
   }
@@ -2008,14 +2009,14 @@ function watchEventsFile() {
             const event = JSON.parse(line) as ClaudeEvent
             addEvent(event)
             debug(`New event from file: ${event.type}`)
-          } catch {
+          } catch (e) {
             debug(`Failed to parse new event: ${line}`)
           }
         }
 
         lastFileSize = content.length
       }
-    } catch {
+    } catch (e) {
       debug(`Error reading events file: ${e}`)
     }
   })
@@ -2154,7 +2155,7 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
           debug(`Received event via HTTP: ${event.type}`)
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ ok: true }))
-        } catch {
+        } catch (e) {
           debug(`Failed to parse HTTP event: ${e}`)
           res.writeHead(400, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ error: 'Invalid JSON' }))
@@ -2289,7 +2290,7 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
 
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ ok: true, saved: PENDING_PROMPT_FILE }))
-        } catch {
+        } catch (e) {
           debug(`Failed to save prompt: ${e}`)
           res.writeHead(400, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ error: 'Invalid JSON' }))
@@ -2330,7 +2331,7 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
   if (req.method === 'GET' && req.url === '/tmux-output') {
     try {
       validateTmuxSession(TMUX_SESSION)
-    } catch {
+    } catch (e) {
       res.writeHead(400, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ ok: false, error: 'Invalid tmux session name', output: '' }))
       return
@@ -2358,7 +2359,7 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
   if (req.method === 'POST' && req.url === '/cancel') {
     try {
       validateTmuxSession(TMUX_SESSION)
-    } catch {
+    } catch (e) {
       res.writeHead(400, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ ok: false, error: 'Invalid tmux session name' }))
       return
@@ -2408,7 +2409,7 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
           }
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ ok: true, cliCommand: claudeCommand }))
-        } catch {
+        } catch (e) {
           res.writeHead(400, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ ok: false, error: 'Invalid JSON' }))
         }
@@ -2456,7 +2457,7 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
           const session = createImplicitSession(options)
           res.writeHead(201, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ ok: true, session }))
-        } catch {
+        } catch (e) {
           res.writeHead(500, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ ok: false, error: (e as Error).message }))
         }
@@ -2477,7 +2478,7 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
           const session = await createSession(options)
           res.writeHead(201, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ ok: true, session }))
-        } catch {
+        } catch (e) {
           res.writeHead(500, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ ok: false, error: (e as Error).message }))
         }
@@ -2544,7 +2545,7 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
           const workspace = workspaceManager.createWorkspace(request)
           res.writeHead(201, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ ok: true, workspace }))
-        } catch {
+        } catch (e) {
           res.writeHead(400, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ ok: false, error: 'Invalid JSON' }))
         }
@@ -2589,7 +2590,7 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
               res.writeHead(404, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify({ ok: false, error: 'Workspace not found' }))
             }
-          } catch {
+          } catch (e) {
             res.writeHead(400, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ ok: false, error: 'Invalid JSON' }))
           }
@@ -2690,7 +2691,7 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
           }
           res.writeHead(201, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ ok: true, project }))
-        } catch {
+        } catch (e) {
           res.writeHead(400, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ ok: false, error: (e as Error).message }))
         }
@@ -2774,7 +2775,7 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
           const result = await orchestratorManager.submitTask(request)
           res.writeHead(result.ok ? 201 : 400, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify(result))
-        } catch {
+        } catch (e) {
           res.writeHead(400, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ ok: false, error: (e as Error).message }))
         }
@@ -2913,7 +2914,7 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
           const result = await julesService.createTask(repo || '', description)
           res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify(result))
-        } catch {
+        } catch (e) {
           res.writeHead(400, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ ok: false, error: 'Invalid JSON' }))
         }
@@ -3028,7 +3029,7 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
           const result = await mcpMarketplace.install(serverId, envVars)
           res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify(result))
-        } catch {
+        } catch (e) {
           res.writeHead(400, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ ok: false, error: 'Invalid JSON' }))
         }
@@ -3054,7 +3055,7 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
           const result = await mcpMarketplace.uninstall(serverId)
           res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify(result))
-        } catch {
+        } catch (e) {
           res.writeHead(400, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ ok: false, error: 'Invalid JSON' }))
         }
@@ -3080,7 +3081,7 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
           const result = await mcpMarketplace.configure(serverId, envVars || {})
           res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify(result))
-        } catch {
+        } catch (e) {
           res.writeHead(400, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ ok: false, error: 'Invalid JSON' }))
         }
@@ -3125,7 +3126,7 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
               res.writeHead(404, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify({ ok: false, error: 'Session not found' }))
             }
-          } catch {
+          } catch (e) {
             res.writeHead(400, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ ok: false, error: 'Invalid JSON' }))
           }
@@ -3165,7 +3166,7 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
             const result = await sendPromptToSession(sessionId, prompt)
             res.writeHead(result.ok ? 200 : 404, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify(result))
-          } catch {
+          } catch (e) {
             res.writeHead(400, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ ok: false, error: 'Invalid JSON' }))
           }
@@ -3200,7 +3201,7 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
 
       try {
         validateTmuxSession(session.tmuxSession)
-      } catch {
+      } catch (e) {
         res.writeHead(400, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ ok: false, error: 'Invalid tmux session name' }))
         return
@@ -3240,7 +3241,7 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
             sendPermissionResponse(sessionId, response)
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ ok: true }))
-          } catch {
+          } catch (e) {
             res.writeHead(400, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ ok: false, error: 'Invalid JSON' }))
           }
@@ -3285,7 +3286,7 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
       // Validate inputs to prevent command injection
       try {
         validateTmuxSession(session.tmuxSession)
-      } catch {
+      } catch (e) {
         res.writeHead(400, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ ok: false, error: 'Invalid tmux session name' }))
         return
@@ -3379,7 +3380,7 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
             saveSessions()
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ ok: true, session }))
-          } catch {
+          } catch (e) {
             res.writeHead(400, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ ok: false, error: 'Invalid JSON' }))
           }
@@ -3431,7 +3432,7 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
           log(`Created text tile: "${tile.text}" at (${tile.position.q}, ${tile.position.r})`)
           res.writeHead(201, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ ok: true, tile }))
-        } catch {
+        } catch (e) {
           res.writeHead(400, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ ok: false, error: 'Invalid JSON' }))
         }
@@ -3472,7 +3473,7 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
             log(`Updated text tile: "${tile.text}"`)
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ ok: true, tile }))
-          } catch {
+          } catch (e) {
             res.writeHead(400, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ ok: false, error: 'Invalid JSON' }))
           }
@@ -3536,7 +3537,7 @@ function serveStaticFile(req: IncomingMessage, res: ServerResponse): void {
   let decodedPath: string
   try {
     decodedPath = decodeURIComponent(urlPath)
-  } catch {
+  } catch (e) {
     // Invalid URL encoding
     res.writeHead(400)
     res.end('Bad request')
@@ -3722,7 +3723,7 @@ async function main() {
       try {
         const message = JSON.parse(data.toString()) as ClientMessage
         handleClientMessage(ws, message)
-      } catch {
+      } catch (e) {
         debug(`Failed to parse client message: ${e}`)
       }
     })

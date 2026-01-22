@@ -36,3 +36,6 @@ npm-debug.log*
 bin/vibecraft
 scripts/test-*.sh
 todo.txt
+.serena/
+playwright-report/
+test-results/
