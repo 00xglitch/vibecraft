@@ -7,7 +7,8 @@
 
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
-import type { StationType, TextTile } from '../../shared/types'
+import type { StationType, TextTile, ZoneThemeId } from '../../shared/types'
+import { ZONE_THEMES } from '../../shared/types'
 import { HexGrid } from '../utils/HexGrid'
 import { soundManager } from '../audio'
 import { ZoneNotifications, type NotificationOptions } from './ZoneNotifications'
@@ -22,15 +23,30 @@ import {
   addDeskDetails,
   addWorkbenchDetails,
   addTaskboardDetails,
+  addMCPStationDetails,
+  MCP_STATION_CONFIGS,
 } from './stations'
+import type { MCPToolCategory } from '../mcp'
+import { zoneLOD, memoryBudget, type LODLevel, type LODFeatures } from '../systems'
 
 export interface Station {
   type: StationType
-  position: THREE.Vector3  // World position (updated when zone elevation changes)
-  localPosition: THREE.Vector3  // Position relative to zone (for recalculating world pos)
+  position: THREE.Vector3 // World position (updated when zone elevation changes)
+  localPosition: THREE.Vector3 // Position relative to zone (for recalculating world pos)
   mesh: THREE.Group
   label: string
   contextSprite?: THREE.Sprite
+}
+
+/** Dynamic MCP station (smaller, outer ring) */
+export interface MCPStation {
+  category: MCPToolCategory
+  serverName: string // e.g., "playwright", "serena"
+  position: THREE.Vector3
+  localPosition: THREE.Vector3
+  mesh: THREE.Group
+  label: string
+  slotIndex: number // Position in outer ring (0-11)
 }
 
 export type AttentionReason = 'question' | 'finished' | 'error' | null
@@ -45,7 +61,7 @@ export interface Zone {
   color: number
   position: THREE.Vector3
   label?: THREE.Sprite
-  gitLabel?: THREE.Sprite  // Git status display on floor
+  gitLabel?: THREE.Sprite // Git status display on floor
   pulseIntensity: number // For activity pulse effect
   attentionReason: AttentionReason // Persistent attention state
   attentionTime: number // Time accumulator for attention pulse
@@ -66,6 +82,14 @@ export interface Zone {
   edgeLines?: THREE.LineSegments
   // Solid side faces (shown when elevated)
   sideMesh?: THREE.Mesh
+  // LOD state
+  lodLevel?: LODLevel
+  /** Whether full station details are loaded (for lazy loading) */
+  detailsLoaded?: boolean
+  /** Dynamic MCP stations (outer ring) */
+  mcpStations: Map<string, MCPStation> // Key: serverName
+  /** Current theme ID (if customized) */
+  themeId?: ZoneThemeId
 }
 
 export type CameraMode = 'focused' | 'overview' | 'follow-active'
@@ -90,17 +114,20 @@ export class WorkshopScene {
 
   // Multi-zone support
   public zones: Map<string, Zone> = new Map()
-  public hexGrid: HexGrid  // Hex grid for zone placement
-  private zoneColorIndex = 0  // For cycling through colors
+  public hexGrid: HexGrid // Hex grid for zone placement
+  private zoneColorIndex = 0 // For cycling through colors
 
   // Pending zones (loading animation before zone is created)
-  private pendingZones: Map<string, {
-    group: THREE.Group
-    spinner: THREE.Group
-    ring: THREE.Line
-    position: THREE.Vector3
-    age: number
-  }> = new Map()
+  private pendingZones: Map<
+    string,
+    {
+      group: THREE.Group
+      spinner: THREE.Group
+      ring: THREE.Line
+      position: THREE.Vector3
+      age: number
+    }
+  > = new Map()
 
   // Pending zone animation constants
   private static readonly PENDING = {
@@ -153,11 +180,11 @@ export class WorkshopScene {
     age: number
     maxAge: number
     type?: 'ring' | 'hex' | 'ripple'
-    delay?: number  // Delay before animation starts (for ripple effect)
-    startOpacity?: number  // Peak opacity when flashing
-    baseOpacity?: number  // Opacity to fade back to (matches permanent grid)
-    highlightColor?: THREE.Color  // Color to flash to
-    baseColor?: THREE.Color  // Color to fade back to
+    delay?: number // Delay before animation starts (for ripple effect)
+    startOpacity?: number // Peak opacity when flashing
+    baseOpacity?: number // Opacity to fade back to (matches permanent grid)
+    highlightColor?: THREE.Color // Color to flash to
+    baseColor?: THREE.Color // Color to fade back to
   }> = []
 
   // Station glow pulses (brief highlight when tool uses station)
@@ -200,10 +227,13 @@ export class WorkshopScene {
   private worldHexGrid: THREE.Group | THREE.LineSegments | null = null
 
   // Text tiles (grid labels)
-  private textTileSprites = new Map<string, {
-    sprite: THREE.Sprite
-    tile: TextTile
-  }>()
+  private textTileSprites = new Map<
+    string,
+    {
+      sprite: THREE.Sprite
+      tile: TextTile
+    }
+  >()
 
   // Painted hexes (draw mode) - stores mesh, height, and color
   private paintedHexes = new Map<string, { mesh: THREE.Mesh; height: number; color: number }>()
@@ -274,7 +304,7 @@ export class WorkshopScene {
 
     // Setup
     this.setupLighting()
-    this.createWorldFloor()  // Invisible, just for click detection
+    this.createWorldFloor() // Invisible, just for click detection
     this.createWorldHexGrid()
     this.createAmbientParticles()
     this.setupHoverHighlight()
@@ -285,8 +315,140 @@ export class WorkshopScene {
     // Initialize station panels
     this.stationPanels = new StationPanels(this.scene)
 
+    // Initialize LOD and memory management
+    this.initializeLODSystem()
+
     // Handle resize
     window.addEventListener('resize', this.handleResize)
+  }
+
+  /**
+   * Initialize LOD and memory budget systems
+   */
+  private initializeLODSystem(): void {
+    // Subscribe to LOD changes
+    zoneLOD.onChange((zoneId, level, features) => {
+      this.applyLODToZone(zoneId, level, features)
+    })
+
+    // Subscribe to memory budget unload requests
+    memoryBudget.onUnload((zoneIds) => {
+      for (const zoneId of zoneIds) {
+        this.unloadZoneDetails(zoneId)
+      }
+    })
+
+    // Start memory budget GC timer
+    memoryBudget.start()
+  }
+
+  /**
+   * Apply LOD settings to a zone
+   */
+  private applyLODToZone(zoneId: string, level: LODLevel, features: LODFeatures): void {
+    const zone = this.zones.get(zoneId)
+    if (!zone) return
+
+    zone.lodLevel = level
+
+    // Show/hide stations based on LOD
+    for (const station of zone.stations.values()) {
+      station.mesh.visible = features.stationsVisible
+    }
+
+    // Show/hide particles
+    zone.particles.visible = features.particlesEnabled
+
+    // Show/hide labels
+    if (zone.label) {
+      zone.label.visible = features.labelsVisible
+    }
+    if (zone.gitLabel) {
+      zone.gitLabel.visible = features.gitLabelVisible && zone.gitLabel.userData.hasData
+    }
+
+    // Enable/disable shadows for stations
+    for (const station of zone.stations.values()) {
+      station.mesh.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          child.castShadow = features.shadowsEnabled
+          child.receiveShadow = features.shadowsEnabled
+        }
+      })
+    }
+  }
+
+  /**
+   * Unload detailed meshes from a zone to save memory
+   * (Called by memory budget system)
+   */
+  private unloadZoneDetails(zoneId: string): void {
+    const zone = this.zones.get(zoneId)
+    if (!zone || !zone.detailsLoaded) return
+
+    // For now, just hide stations and disable particles
+    // A more aggressive implementation would dispose geometries
+    for (const station of zone.stations.values()) {
+      station.mesh.visible = false
+    }
+    zone.particles.visible = false
+
+    zone.detailsLoaded = false
+    memoryBudget.setZoneLoaded(zoneId, false)
+
+    console.log(`[Memory] Unloaded details for zone ${zoneId.slice(0, 8)}`)
+  }
+
+  /**
+   * Load detailed meshes for a zone
+   * (Called when zone becomes focused or nearby)
+   */
+  loadZoneDetails(zoneId: string): void {
+    const zone = this.zones.get(zoneId)
+    if (!zone || zone.detailsLoaded) return
+
+    // Re-show stations and particles
+    for (const station of zone.stations.values()) {
+      station.mesh.visible = true
+    }
+    zone.particles.visible = true
+
+    zone.detailsLoaded = true
+    memoryBudget.setZoneLoaded(zoneId, true)
+    memoryBudget.touchZone(zoneId)
+
+    console.log(`[Memory] Loaded details for zone ${zoneId.slice(0, 8)}`)
+  }
+
+  /**
+   * Update LOD for all zones based on camera position
+   */
+  private updateZoneLOD(): void {
+    // Update each zone's LOD based on distance to camera
+    for (const zone of this.zones.values()) {
+      // Skip zones that are animating in/out
+      if (zone.animationState) continue
+
+      zoneLOD.updateZone(zone.id, zone.position, this.camera.position)
+    }
+
+    // Run memory GC with current focus
+    memoryBudget.runGC(this.focusedZoneId)
+  }
+
+  /**
+   * Get memory and LOD statistics for debugging
+   */
+  getPerformanceStats(): {
+    memory: ReturnType<typeof memoryBudget.getStats>
+    lod: ReturnType<typeof zoneLOD.getStats>
+    browserMemory: ReturnType<typeof memoryBudget.getBrowserMemory>
+  } {
+    return {
+      memory: memoryBudget.getStats(),
+      lod: zoneLOD.getStats(),
+      browserMemory: memoryBudget.getBrowserMemory(),
+    }
   }
 
   /**
@@ -298,16 +460,12 @@ export class WorkshopScene {
     const points: THREE.Vector3[] = []
     for (let i = 0; i <= 6; i++) {
       const angle = (Math.PI / 3) * i - Math.PI / 2
-      points.push(new THREE.Vector3(
-        hexRadius * Math.cos(angle),
-        0.03,
-        hexRadius * Math.sin(angle)
-      ))
+      points.push(new THREE.Vector3(hexRadius * Math.cos(angle), 0.03, hexRadius * Math.sin(angle)))
     }
 
     const geometry = new THREE.BufferGeometry().setFromPoints(points)
     const material = new THREE.LineBasicMaterial({
-      color: 0x8eeeff,  // Light cyan
+      color: 0x8eeeff, // Light cyan
       transparent: true,
       opacity: 0.7,
     })
@@ -337,7 +495,8 @@ export class WorkshopScene {
       const hexCenter = this.hexGrid.axialToCartesian(hexCoord)
 
       // Check if we moved to a different hex
-      const isNewHex = !this.lastHoveredHex ||
+      const isNewHex =
+        !this.lastHoveredHex ||
         this.lastHoveredHex.q !== hexCoord.q ||
         this.lastHoveredHex.r !== hexCoord.r
 
@@ -403,7 +562,7 @@ export class WorkshopScene {
 
     for (let i = 0; i < P.DOT_COUNT; i++) {
       const dot = new THREE.Mesh(dotGeom, dotMat.clone())
-      const angle = (Math.PI * 2 / P.DOT_COUNT) * i
+      const angle = ((Math.PI * 2) / P.DOT_COUNT) * i
       dot.position.set(
         Math.cos(angle) * P.SPINNER_RADIUS,
         P.SPINNER_HEIGHT,
@@ -423,12 +582,8 @@ export class WorkshopScene {
   private createHexOutline(radius: number, color: number, opacity: number): THREE.Line {
     const points: THREE.Vector3[] = []
     for (let i = 0; i <= 6; i++) {
-      const angle = (Math.PI / 3) * i - Math.PI / 6  // Pointy-top
-      points.push(new THREE.Vector3(
-        Math.cos(angle) * radius,
-        0.1,
-        Math.sin(angle) * radius
-      ))
+      const angle = (Math.PI / 3) * i - Math.PI / 6 // Pointy-top
+      points.push(new THREE.Vector3(Math.cos(angle) * radius, 0.1, Math.sin(angle) * radius))
     }
     return new THREE.Line(
       new THREE.BufferGeometry().setFromPoints(points),
@@ -445,7 +600,7 @@ export class WorkshopScene {
     if (!pending) return
 
     this.scene.remove(pending.group)
-    pending.group.traverse(obj => {
+    pending.group.traverse((obj) => {
       if (obj instanceof THREE.Mesh) {
         obj.geometry?.dispose()
         if (obj.material instanceof THREE.Material) obj.material.dispose()
@@ -472,14 +627,15 @@ export class WorkshopScene {
 
       // Pulse each dot (scale + vertical bob, phase-offset)
       pending.spinner.children.forEach((dot, i) => {
-        const phase = pending.age * P.PULSE_SPEED + i * (Math.PI * 2 / P.DOT_COUNT)
+        const phase = pending.age * P.PULSE_SPEED + i * ((Math.PI * 2) / P.DOT_COUNT)
         dot.scale.setScalar(P.SCALE_BASE + Math.sin(phase) * P.SCALE_RANGE)
         dot.position.y = P.SPINNER_HEIGHT + Math.sin(phase) * P.BOB_RANGE
       })
 
       // Pulse ring opacity
       const ringMat = pending.ring.material as THREE.LineBasicMaterial
-      ringMat.opacity = P.RING_OPACITY_BASE + Math.sin(pending.age * P.RING_PULSE_SPEED) * P.RING_OPACITY_RANGE
+      ringMat.opacity =
+        P.RING_OPACITY_BASE + Math.sin(pending.age * P.RING_PULSE_SPEED) * P.RING_OPACITY_RANGE
     }
   }
 
@@ -488,7 +644,10 @@ export class WorkshopScene {
    * @param sessionId - Unique session identifier
    * @param options - Optional color and hint position for direction-aware placement
    */
-  createZone(sessionId: string, options?: { color?: number; hintPosition?: { x: number; z: number } }): Zone {
+  createZone(
+    sessionId: string,
+    options?: { color?: number; hintPosition?: { x: number; z: number } }
+  ): Zone {
     // Check if zone already exists
     const existing = this.zones.get(sessionId)
     if (existing) return existing
@@ -501,7 +660,8 @@ export class WorkshopScene {
           pending.position.x - options.hintPosition.x,
           pending.position.z - options.hintPosition.z
         )
-        if (dist < 25) {  // Within roughly one hex diameter
+        if (dist < 25) {
+          // Within roughly one hex diameter
           this.removePendingZone(pendingId)
           break
         }
@@ -546,8 +706,8 @@ export class WorkshopScene {
 
     // Create git status label on floor
     const gitLabel = this.createGitLabel()
-    gitLabel.position.set(0, 0.15, 2.5)  // Near front edge of hex
-    gitLabel.visible = false  // Hidden until we have git data
+    gitLabel.position.set(0, 0.15, 2.5) // Near front edge of hex
+    gitLabel.visible = false // Hidden until we have git data
     group.add(gitLabel)
 
     // Create particle system for activity effects
@@ -557,8 +717,8 @@ export class WorkshopScene {
     // Create vertical edge lines (hidden until zone is elevated)
     const edgeLines = this.createZoneEdgeLines(zoneColor)
     edgeLines.visible = false
-    this.scene.add(edgeLines)  // Add to scene (not group) so they stay at world origin
-    edgeLines.position.copy(position)  // Position at zone's world location
+    this.scene.add(edgeLines) // Add to scene (not group) so they stay at world origin
+    edgeLines.position.copy(position) // Position at zone's world location
 
     // Create solid side faces (hidden until zone is elevated)
     const sideMesh = this.createZoneSideMesh(zoneColor)
@@ -590,6 +750,8 @@ export class WorkshopScene {
       elevation: 0,
       edgeLines,
       sideMesh,
+      // Dynamic MCP stations
+      mcpStations: new Map(),
     }
 
     // Start with scale 0 for enter animation
@@ -602,7 +764,15 @@ export class WorkshopScene {
     if (label) label.visible = false
     particles.visible = false
 
+    // Mark zone as having details loaded
+    zone.detailsLoaded = true
+    zone.lodLevel = 'high'
+
     this.zones.set(sessionId, zone)
+
+    // Register with LOD and memory systems
+    zoneLOD.registerZone(sessionId)
+    memoryBudget.registerZone(sessionId, true)
 
     // Register zone with notification system
     this.zoneNotifications.registerZone(sessionId, position)
@@ -685,6 +855,10 @@ export class WorkshopScene {
     const zone = this.zones.get(sessionId)
     if (!zone) return
 
+    // Unregister from LOD and memory systems
+    zoneLOD.unregisterZone(sessionId)
+    memoryBudget.unregisterZone(sessionId)
+
     // Unregister from notification system
     this.zoneNotifications.unregisterZone(sessionId)
 
@@ -699,7 +873,7 @@ export class WorkshopScene {
       if (obj instanceof THREE.Mesh) {
         obj.geometry?.dispose()
         if (Array.isArray(obj.material)) {
-          obj.material.forEach(m => m.dispose())
+          obj.material.forEach((m) => m.dispose())
         } else if (obj.material) {
           obj.material.dispose()
         }
@@ -792,6 +966,15 @@ export class WorkshopScene {
     this.focusedZoneId = sessionId
     this.cameraMode = 'focused'
 
+    // Update LOD system with new focus
+    zoneLOD.setFocusedZone(sessionId)
+    memoryBudget.touchZone(sessionId)
+
+    // Ensure focused zone has full details loaded
+    if (!zone.detailsLoaded) {
+      this.loadZoneDetails(sessionId)
+    }
+
     // Account for zone elevation (raised zones from hex painting underneath)
     const target = zone.position.clone()
     target.y += zone.elevation
@@ -817,7 +1000,7 @@ export class WorkshopScene {
     const zone = this.zones.get(sessionId)
     if (!zone) return false
 
-    const maxElevation = 100  // Same as painted hex limit
+    const maxElevation = 100 // Same as painted hex limit
     if (zone.elevation >= maxElevation) return false
 
     const newElevation = Math.min(zone.elevation + amount, maxElevation)
@@ -826,7 +1009,7 @@ export class WorkshopScene {
     // Animate the zone rising
     const startY = zone.group.position.y
     const startTime = performance.now()
-    const duration = 150  // Quick rise animation
+    const duration = 150 // Quick rise animation
 
     const animate = () => {
       const elapsed = performance.now() - startTime
@@ -853,7 +1036,7 @@ export class WorkshopScene {
     requestAnimationFrame(animate)
 
     // Update edge lines and side mesh during animation start
-    zone.elevation = newElevation  // Set temporarily for edge/side update
+    zone.elevation = newElevation // Set temporarily for edge/side update
     this.updateZoneEdgeLines(zone)
     this.updateZoneSideMesh(zone)
 
@@ -883,7 +1066,7 @@ export class WorkshopScene {
     // Animate the zone lowering
     const startY = zone.group.position.y
     const startTime = performance.now()
-    const duration = 150  // Quick animation
+    const duration = 150 // Quick animation
 
     const animate = () => {
       const elapsed = performance.now() - startTime
@@ -910,7 +1093,7 @@ export class WorkshopScene {
     requestAnimationFrame(animate)
 
     // Update edge lines and side mesh during animation start
-    zone.elevation = newElevation  // Set temporarily for edge/side update
+    zone.elevation = newElevation // Set temporarily for edge/side update
     this.updateZoneEdgeLines(zone)
     this.updateZoneSideMesh(zone)
 
@@ -936,8 +1119,10 @@ export class WorkshopScene {
     // Calculate center and extent of all zones
     if (this.zones.size === 0) return
 
-    let minX = Infinity, maxX = -Infinity
-    let minZ = Infinity, maxZ = -Infinity
+    let minX = Infinity,
+      maxX = -Infinity
+    let minZ = Infinity,
+      maxZ = -Infinity
 
     for (const zone of this.zones.values()) {
       minX = Math.min(minX, zone.position.x - 10)
@@ -1061,8 +1246,8 @@ export class WorkshopScene {
       const z = hexRadius * Math.sin(angle)
 
       // Vertical line from y=0 to y=1 (will be scaled by elevation)
-      positions.push(x, 0, z)  // Bottom
-      positions.push(x, 1, z)  // Top
+      positions.push(x, 0, z) // Bottom
+      positions.push(x, 1, z) // Top
     }
 
     // Create horizontal lines connecting corners at top (y=1)
@@ -1116,25 +1301,49 @@ export class WorkshopScene {
       const nz = Math.sin(midAngle)
 
       // Triangle 1: bottom-left, bottom-right, top-right
-      positions[idx * 3] = x1; positions[idx * 3 + 1] = 0; positions[idx * 3 + 2] = z1
-      normals[idx * 3] = nx; normals[idx * 3 + 1] = 0; normals[idx * 3 + 2] = nz
+      positions[idx * 3] = x1
+      positions[idx * 3 + 1] = 0
+      positions[idx * 3 + 2] = z1
+      normals[idx * 3] = nx
+      normals[idx * 3 + 1] = 0
+      normals[idx * 3 + 2] = nz
       idx++
-      positions[idx * 3] = x2; positions[idx * 3 + 1] = 0; positions[idx * 3 + 2] = z2
-      normals[idx * 3] = nx; normals[idx * 3 + 1] = 0; normals[idx * 3 + 2] = nz
+      positions[idx * 3] = x2
+      positions[idx * 3 + 1] = 0
+      positions[idx * 3 + 2] = z2
+      normals[idx * 3] = nx
+      normals[idx * 3 + 1] = 0
+      normals[idx * 3 + 2] = nz
       idx++
-      positions[idx * 3] = x2; positions[idx * 3 + 1] = 1; positions[idx * 3 + 2] = z2
-      normals[idx * 3] = nx; normals[idx * 3 + 1] = 0; normals[idx * 3 + 2] = nz
+      positions[idx * 3] = x2
+      positions[idx * 3 + 1] = 1
+      positions[idx * 3 + 2] = z2
+      normals[idx * 3] = nx
+      normals[idx * 3 + 1] = 0
+      normals[idx * 3 + 2] = nz
       idx++
 
       // Triangle 2: bottom-left, top-right, top-left
-      positions[idx * 3] = x1; positions[idx * 3 + 1] = 0; positions[idx * 3 + 2] = z1
-      normals[idx * 3] = nx; normals[idx * 3 + 1] = 0; normals[idx * 3 + 2] = nz
+      positions[idx * 3] = x1
+      positions[idx * 3 + 1] = 0
+      positions[idx * 3 + 2] = z1
+      normals[idx * 3] = nx
+      normals[idx * 3 + 1] = 0
+      normals[idx * 3 + 2] = nz
       idx++
-      positions[idx * 3] = x2; positions[idx * 3 + 1] = 1; positions[idx * 3 + 2] = z2
-      normals[idx * 3] = nx; normals[idx * 3 + 1] = 0; normals[idx * 3 + 2] = nz
+      positions[idx * 3] = x2
+      positions[idx * 3 + 1] = 1
+      positions[idx * 3 + 2] = z2
+      normals[idx * 3] = nx
+      normals[idx * 3 + 1] = 0
+      normals[idx * 3 + 2] = nz
       idx++
-      positions[idx * 3] = x1; positions[idx * 3 + 1] = 1; positions[idx * 3 + 2] = z1
-      normals[idx * 3] = nx; normals[idx * 3 + 1] = 0; normals[idx * 3 + 2] = nz
+      positions[idx * 3] = x1
+      positions[idx * 3 + 1] = 1
+      positions[idx * 3 + 2] = z1
+      normals[idx * 3] = nx
+      normals[idx * 3 + 1] = 0
+      normals[idx * 3 + 2] = nz
       idx++
     }
 
@@ -1259,18 +1468,21 @@ export class WorkshopScene {
     return shape
   }
 
-  private createZonePlatform(group: THREE.Group, color: number): { platform: THREE.Mesh; ring: THREE.Mesh; floor: THREE.Mesh } {
+  private createZonePlatform(
+    group: THREE.Group,
+    color: number
+  ): { platform: THREE.Mesh; ring: THREE.Mesh; floor: THREE.Mesh } {
     const hexRadius = 10
 
     // Zone floor hexagon - slightly brighter/more active than world
     const floorShape = this.createHexagonShape(hexRadius)
     const floorGeometry = new THREE.ShapeGeometry(floorShape)
     const floorMaterial = new THREE.MeshStandardMaterial({
-      color: 0x1a2535,  // Slightly brighter blue - more "active"
+      color: 0x1a2535, // Slightly brighter blue - more "active"
       roughness: 0.7,
       metalness: 0.15,
       emissive: color,
-      emissiveIntensity: 0.02,  // Subtle glow from zone color
+      emissiveIntensity: 0.02, // Subtle glow from zone color
     })
     const floor = new THREE.Mesh(floorGeometry, floorMaterial)
     floor.rotation.x = -Math.PI / 2
@@ -1320,9 +1532,9 @@ export class WorkshopScene {
    */
   private addHexGridLines(group: THREE.Group, radius: number): void {
     const lineMaterial = new THREE.LineBasicMaterial({
-      color: 0x3090b0,  // Cyan/teal
+      color: 0x3090b0, // Cyan/teal
       transparent: true,
-      opacity: 0.25
+      opacity: 0.25,
     })
 
     // Draw lines from center to each vertex
@@ -1342,11 +1554,7 @@ export class WorkshopScene {
       const ringPoints: THREE.Vector3[] = []
       for (let i = 0; i <= 6; i++) {
         const angle = (Math.PI / 3) * i - Math.PI / 2
-        ringPoints.push(new THREE.Vector3(
-          r * Math.cos(angle),
-          0.01,
-          r * Math.sin(angle)
-        ))
+        ringPoints.push(new THREE.Vector3(r * Math.cos(angle), 0.01, r * Math.sin(angle)))
       }
       const ringGeo = new THREE.BufferGeometry().setFromPoints(ringPoints)
       const ringLine = new THREE.Line(ringGeo, lineMaterial)
@@ -1425,7 +1633,7 @@ export class WorkshopScene {
     ctx.shadowBlur = 12
     ctx.fillStyle = 'rgba(0, 0, 0, 0.8)'
     ctx.fillText(fullText, centerX, centerY)
-    ctx.fillText(fullText, centerX, centerY)  // Double for stronger shadow
+    ctx.fillText(fullText, centerX, centerY) // Double for stronger shadow
     ctx.restore()
 
     // Colored glow - outer (big bloom)
@@ -1502,7 +1710,7 @@ export class WorkshopScene {
    */
   setTextTiles(tiles: TextTile[]): void {
     // Remove tiles that no longer exist
-    const newIds = new Set(tiles.map(t => t.id))
+    const newIds = new Set(tiles.map((t) => t.id))
     for (const [id] of this.textTileSprites) {
       if (!newIds.has(id)) {
         this.removeTextTile(id)
@@ -1607,7 +1815,7 @@ export class WorkshopScene {
    * Get all text tiles
    */
   getTextTiles(): TextTile[] {
-    return Array.from(this.textTileSprites.values()).map(e => e.tile)
+    return Array.from(this.textTileSprites.values()).map((e) => e.tile)
   }
 
   /**
@@ -1626,8 +1834,8 @@ export class WorkshopScene {
     // Must maintain canvas aspect ratio (2:1) to avoid text distortion
     // Scale uniformly based on line count
     const baseWidth = 16
-    const baseHeight = 8  // 2:1 ratio matches canvas 1024x512
-    const scale = 1 + (lineCount - 1) * 0.3  // Grow 30% per extra line
+    const baseHeight = 8 // 2:1 ratio matches canvas 1024x512
+    const scale = 1 + (lineCount - 1) * 0.3 // Grow 30% per extra line
     sprite.scale.set(baseWidth * scale, baseHeight * scale, 1)
 
     return sprite
@@ -1636,7 +1844,10 @@ export class WorkshopScene {
   /**
    * Create texture for text tile with multi-line support
    */
-  private createTextTileTexture(text: string, color?: string): {
+  private createTextTileTexture(
+    text: string,
+    color?: string
+  ): {
     texture: THREE.CanvasTexture
     lineCount: number
   } {
@@ -1647,12 +1858,12 @@ export class WorkshopScene {
     canvas.width = 1024
     canvas.height = 512
 
-    const tileColor = color || '#4ac8e8'  // Default to cyan theme
+    const tileColor = color || '#4ac8e8' // Default to cyan theme
     const fontSize = 36
     const lineHeight = fontSize * 1.4
     const padding = 32
     const maxWidth = canvas.width - padding * 2
-    const minContentWidth = 200  // Minimum panel width for short text
+    const minContentWidth = 200 // Minimum panel width for short text
 
     // Setup font for measurements
     ctx.font = `500 ${fontSize}px ui-sans-serif, system-ui, -apple-system, sans-serif`
@@ -1662,14 +1873,17 @@ export class WorkshopScene {
 
     // Calculate actual content bounds with minimum width
     const textHeight = lines.length * lineHeight
-    const maxLineWidth = Math.max(...lines.map(line => ctx.measureText(line).width))
-    const contentWidth = Math.max(Math.min(maxLineWidth + padding * 2, canvas.width), minContentWidth)
+    const maxLineWidth = Math.max(...lines.map((line) => ctx.measureText(line).width))
+    const contentWidth = Math.max(
+      Math.min(maxLineWidth + padding * 2, canvas.width),
+      minContentWidth
+    )
     const contentHeight = textHeight + padding * 2
 
     // Calculate panel dimensions (centered in canvas)
     const panelX = (canvas.width - contentWidth) / 2
     const panelY = (canvas.height - contentHeight) / 2
-    const bevel = Math.min(contentHeight * 0.25, 60)  // Hex-style beveled corners, capped to avoid cutting text
+    const bevel = Math.min(contentHeight * 0.25, 60) // Hex-style beveled corners, capped to avoid cutting text
 
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height)
@@ -1678,14 +1892,14 @@ export class WorkshopScene {
     ctx.save()
     ctx.fillStyle = 'rgba(10, 12, 18, 0.92)'
     ctx.beginPath()
-    ctx.moveTo(panelX + bevel, panelY)  // Top-left after bevel
-    ctx.lineTo(panelX + contentWidth - bevel, panelY)  // Top-right before bevel
-    ctx.lineTo(panelX + contentWidth, panelY + bevel)  // Right top corner
-    ctx.lineTo(panelX + contentWidth, panelY + contentHeight - bevel)  // Right bottom before bevel
-    ctx.lineTo(panelX + contentWidth - bevel, panelY + contentHeight)  // Bottom-right
-    ctx.lineTo(panelX + bevel, panelY + contentHeight)  // Bottom-left
-    ctx.lineTo(panelX, panelY + contentHeight - bevel)  // Left bottom corner
-    ctx.lineTo(panelX, panelY + bevel)  // Left top before bevel
+    ctx.moveTo(panelX + bevel, panelY) // Top-left after bevel
+    ctx.lineTo(panelX + contentWidth - bevel, panelY) // Top-right before bevel
+    ctx.lineTo(panelX + contentWidth, panelY + bevel) // Right top corner
+    ctx.lineTo(panelX + contentWidth, panelY + contentHeight - bevel) // Right bottom before bevel
+    ctx.lineTo(panelX + contentWidth - bevel, panelY + contentHeight) // Bottom-right
+    ctx.lineTo(panelX + bevel, panelY + contentHeight) // Bottom-left
+    ctx.lineTo(panelX, panelY + contentHeight - bevel) // Left bottom corner
+    ctx.lineTo(panelX, panelY + bevel) // Left top before bevel
     ctx.closePath()
     ctx.fill()
     ctx.restore()
@@ -1695,7 +1909,7 @@ export class WorkshopScene {
     ctx.textAlign = 'center'
     ctx.textBaseline = 'top'
 
-    const textStartY = panelY + padding + 4  // Below accent line
+    const textStartY = panelY + padding + 4 // Below accent line
     const centerX = canvas.width / 2
 
     // Subtle glow layer
@@ -1797,7 +2011,13 @@ export class WorkshopScene {
    */
   updateZoneGitStatus(
     sessionId: string,
-    gitStatus: { branch: string; linesAdded: number; linesRemoved: number; totalFiles: number; isRepo: boolean } | null
+    gitStatus: {
+      branch: string
+      linesAdded: number
+      linesRemoved: number
+      totalFiles: number
+      isRepo: boolean
+    } | null
   ): void {
     const zone = this.zones.get(sessionId)
     if (!zone || !zone.gitLabel) return
@@ -1809,7 +2029,8 @@ export class WorkshopScene {
     }
 
     // Format: "main +142/-37" or "main • clean" if no changes
-    const hasChanges = gitStatus.linesAdded > 0 || gitStatus.linesRemoved > 0 || gitStatus.totalFiles > 0
+    const hasChanges =
+      gitStatus.linesAdded > 0 || gitStatus.linesRemoved > 0 || gitStatus.totalFiles > 0
     let text: string
     let color: string
 
@@ -1818,15 +2039,15 @@ export class WorkshopScene {
       // Color based on amount of changes
       const changeScore = gitStatus.linesAdded + gitStatus.linesRemoved
       if (changeScore > 500) {
-        color = '#f87171'  // Red - lots of changes
+        color = '#f87171' // Red - lots of changes
       } else if (changeScore > 100) {
-        color = '#fbbf24'  // Amber - moderate changes
+        color = '#fbbf24' // Amber - moderate changes
       } else {
-        color = '#4ade80'  // Green - small changes
+        color = '#4ade80' // Green - small changes
       }
     } else {
       text = `${gitStatus.branch} ✓`
-      color = '#9ca3af'  // Gray - clean
+      color = '#9ca3af' // Gray - clean
     }
 
     // Draw the label
@@ -1926,11 +2147,14 @@ export class WorkshopScene {
     const ringMat = zone.ring.material as THREE.MeshBasicMaterial
 
     // Status color mappings (ice/cyan theme)
-    const statusColors: Record<Zone['status'], { emissive: number; intensity: number; ring: number; ringOpacity: number }> = {
+    const statusColors: Record<
+      Zone['status'],
+      { emissive: number; intensity: number; ring: number; ringOpacity: number }
+    > = {
       idle: { emissive: zone.color, intensity: 0.02, ring: zone.color, ringOpacity: 0.4 },
       working: { emissive: 0x22d3ee, intensity: 0.08, ring: 0x22d3ee, ringOpacity: 0.5 },
       waiting: { emissive: 0xfbbf24, intensity: 0.06, ring: 0xfbbf24, ringOpacity: 0.6 },
-      attention: { emissive: 0xf87171, intensity: 0.10, ring: 0xf87171, ringOpacity: 0.7 },
+      attention: { emissive: 0xf87171, intensity: 0.1, ring: 0xf87171, ringOpacity: 0.7 },
       offline: { emissive: 0x404050, intensity: 0.01, ring: 0x404050, ringOpacity: 0.2 },
     }
 
@@ -1943,6 +2167,79 @@ export class WorkshopScene {
     // Update ring to match (overrides attention pulse animation)
     ringMat.color.setHex(colors.ring)
     ringMat.opacity = colors.ringOpacity
+  }
+
+  /**
+   * Apply a theme to a zone
+   * Changes the zone's base color which affects all subsequent status color calculations
+   */
+  applyZoneTheme(sessionId: string, themeId: ZoneThemeId): void {
+    const zone = this.zones.get(sessionId)
+    if (!zone) return
+
+    const theme = ZONE_THEMES[themeId]
+    if (!theme) {
+      console.warn(`Unknown theme: ${themeId}`)
+      return
+    }
+
+    // Store the theme ID
+    zone.themeId = themeId
+
+    // Update zone's base color
+    zone.color = theme.primary
+
+    // Update platform color
+    const platformMat = zone.platform.material as THREE.MeshStandardMaterial
+    platformMat.color.setHex(theme.primary)
+
+    // Update floor glow color
+    const floorMat = zone.floor.material as THREE.MeshStandardMaterial
+    floorMat.emissive.setHex(theme.floorGlow)
+
+    // Update ring color
+    const ringMat = zone.ring.material as THREE.MeshBasicMaterial
+    ringMat.color.setHex(theme.stationRing)
+
+    // Update edge lines if present
+    if (zone.edgeLines) {
+      const edgeMat = zone.edgeLines.material as THREE.LineBasicMaterial
+      edgeMat.color.setHex(theme.primary)
+    }
+
+    // Update side mesh if present
+    if (zone.sideMesh) {
+      const sideMat = zone.sideMesh.material as THREE.MeshStandardMaterial
+      sideMat.color.setHex(theme.secondary)
+    }
+
+    // Update station ring colors
+    for (const station of zone.stations.values()) {
+      station.mesh.traverse((child) => {
+        if (child instanceof THREE.Mesh && child.geometry instanceof THREE.RingGeometry) {
+          const mat = child.material as THREE.MeshBasicMaterial
+          mat.color.setHex(theme.stationRing)
+        }
+      })
+    }
+
+    // Update zone label color
+    if (zone.label) {
+      const labelMat = zone.label.material as THREE.SpriteMaterial
+      labelMat.color.setHex(theme.primary)
+    }
+
+    // Re-apply status to refresh colors with new theme
+    this.setZoneStatus(sessionId, zone.status)
+
+    console.log(`Applied theme "${themeId}" to zone ${sessionId}`)
+  }
+
+  /**
+   * Get the current theme ID for a zone
+   */
+  getZoneTheme(sessionId: string): ZoneThemeId | undefined {
+    return this.zones.get(sessionId)?.themeId
   }
 
   /**
@@ -1983,7 +2280,7 @@ export class WorkshopScene {
     const baseOpacity = ringMat.opacity
 
     // Don't add another pulse if already pulsing
-    if (this.stationPulses.some(p => p.ring === ring)) return
+    if (this.stationPulses.some((p) => p.ring === ring)) return
 
     this.stationPulses.push({
       ring,
@@ -1997,7 +2294,10 @@ export class WorkshopScene {
   /**
    * Create particle system for a zone
    */
-  private createParticleSystem(color: number): { particles: THREE.Points; velocities: Float32Array } {
+  private createParticleSystem(color: number): {
+    particles: THREE.Points
+    velocities: Float32Array
+  } {
     const particleCount = 20
     const positions = new Float32Array(particleCount * 3)
     const velocities = new Float32Array(particleCount * 3)
@@ -2065,9 +2365,9 @@ export class WorkshopScene {
 
     // Initialize particles in a smaller area above zones
     for (let i = 0; i < particleCount; i++) {
-      const radius = 2 + Math.random() * 15  // Stay closer to center (2-17 units)
+      const radius = 2 + Math.random() * 15 // Stay closer to center (2-17 units)
       const angle = Math.random() * Math.PI * 2
-      const baseY = 6 + Math.random() * 12  // Float higher (6-18 units up)
+      const baseY = 6 + Math.random() * 12 // Float higher (6-18 units up)
 
       positions[i * 3] = Math.cos(angle) * radius
       positions[i * 3 + 1] = baseY
@@ -2137,14 +2437,14 @@ export class WorkshopScene {
       color: number
     }> = [
       { type: 'center', position: [0, 0, 0], label: 'Center', color: zoneColor },
-      { type: 'bookshelf', position: [0, 0, -4], label: 'Library', color: 0x2a4a5a },      // Dark teal
-      { type: 'desk', position: [4, 0, 0], label: 'Desk', color: 0x3a4a5a },              // Blue-gray
-      { type: 'workbench', position: [-4, 0, 0], label: 'Workbench', color: 0x3a4a55 },   // Steel blue
-      { type: 'terminal', position: [0, 0, 4], label: 'Terminal', color: 0x1a2a3a },      // Dark blue
-      { type: 'scanner', position: [3, 0, -3], label: 'Scanner', color: 0x2a4a6a },       // Blue
-      { type: 'antenna', position: [-3, 0, -3], label: 'Antenna', color: 0x3a5a6a },      // Teal
-      { type: 'portal', position: [-3, 0, 3], label: 'Portal', color: 0x3a4a6a },         // Deep blue
-      { type: 'taskboard', position: [3, 0, 3], label: 'Task Board', color: 0x3a4a5a },   // Blue-gray
+      { type: 'bookshelf', position: [0, 0, -4], label: 'Library', color: 0x2a4a5a }, // Dark teal
+      { type: 'desk', position: [4, 0, 0], label: 'Desk', color: 0x3a4a5a }, // Blue-gray
+      { type: 'workbench', position: [-4, 0, 0], label: 'Workbench', color: 0x3a4a55 }, // Steel blue
+      { type: 'terminal', position: [0, 0, 4], label: 'Terminal', color: 0x1a2a3a }, // Dark blue
+      { type: 'scanner', position: [3, 0, -3], label: 'Scanner', color: 0x2a4a6a }, // Blue
+      { type: 'antenna', position: [-3, 0, -3], label: 'Antenna', color: 0x3a5a6a }, // Teal
+      { type: 'portal', position: [-3, 0, 3], label: 'Portal', color: 0x3a4a6a }, // Deep blue
+      { type: 'taskboard', position: [3, 0, 3], label: 'Task Board', color: 0x3a4a5a }, // Blue-gray
     ]
 
     for (const config of stationConfigs) {
@@ -2257,6 +2557,205 @@ export class WorkshopScene {
     }
   }
 
+  // ============================================================================
+  // Dynamic MCP Stations
+  // ============================================================================
+
+  /** Outer ring positions for MCP stations (12 slots at radius 6) */
+  private static readonly MCP_STATION_RADIUS = 6
+  private static readonly MCP_STATION_SLOTS = 12
+
+  /**
+   * Add or update an MCP station for a server in a zone
+   * Called when MCP tools are used to dynamically create stations
+   */
+  addMCPStation(
+    sessionId: string,
+    serverName: string,
+    category: MCPToolCategory
+  ): MCPStation | null {
+    const zone = this.zones.get(sessionId)
+    if (!zone) return null
+
+    // Check if station already exists for this server
+    if (zone.mcpStations.has(serverName)) {
+      return zone.mcpStations.get(serverName)!
+    }
+
+    // Find next available slot
+    const usedSlots = new Set<number>()
+    for (const station of zone.mcpStations.values()) {
+      usedSlots.add(station.slotIndex)
+    }
+
+    let slotIndex = -1
+    for (let i = 0; i < WorkshopScene.MCP_STATION_SLOTS; i++) {
+      if (!usedSlots.has(i)) {
+        slotIndex = i
+        break
+      }
+    }
+
+    if (slotIndex === -1) {
+      console.warn(`MCP station limit reached for zone ${sessionId}`)
+      return null
+    }
+
+    // Create the station
+    const station = this.createMCPStationInZone(zone, serverName, category, slotIndex)
+    zone.mcpStations.set(serverName, station)
+
+    return station
+  }
+
+  /**
+   * Create an MCP station at a specific slot in the outer ring
+   */
+  private createMCPStationInZone(
+    zone: Zone,
+    serverName: string,
+    category: MCPToolCategory,
+    slotIndex: number
+  ): MCPStation {
+    const config = MCP_STATION_CONFIGS[category]
+    const radius = WorkshopScene.MCP_STATION_RADIUS
+    const totalSlots = WorkshopScene.MCP_STATION_SLOTS
+
+    // Calculate position in outer ring (evenly distributed)
+    const angle = (slotIndex / totalSlots) * Math.PI * 2 - Math.PI / 2 // Start at top
+    const x = Math.cos(angle) * radius
+    const z = Math.sin(angle) * radius
+
+    const stationGroup = new THREE.Group()
+
+    // Smaller base than regular stations
+    const baseGeometry = new THREE.CylinderGeometry(0.5, 0.6, 0.5, 6) // Hexagonal base
+    const baseMaterial = new THREE.MeshStandardMaterial({
+      color: config.color,
+      roughness: 0.6,
+      metalness: 0.3,
+      emissive: config.color,
+      emissiveIntensity: 0.1,
+    })
+    const base = new THREE.Mesh(baseGeometry, baseMaterial)
+    base.position.y = 0.25
+    base.castShadow = true
+    base.receiveShadow = true
+    stationGroup.add(base)
+
+    // Add category-specific details
+    addMCPStationDetails(stationGroup, category)
+
+    // Station indicator ring (smaller, colored by category)
+    const ringGeometry = new THREE.RingGeometry(0.55, 0.65, 6) // Hexagonal ring
+    const ringMaterial = new THREE.MeshBasicMaterial({
+      color: config.color,
+      transparent: true,
+      opacity: 0.5,
+      side: THREE.DoubleSide,
+    })
+    const ring = new THREE.Mesh(ringGeometry, ringMaterial)
+    ring.rotation.x = -Math.PI / 2
+    ring.position.y = 0.02
+    stationGroup.add(ring)
+
+    // Server name label (floating above station)
+    const labelSprite = this.createMCPStationLabel(serverName, config.color)
+    labelSprite.position.set(0, 1.8, 0)
+    stationGroup.add(labelSprite)
+
+    stationGroup.position.set(x, 0, z)
+    zone.group.add(stationGroup)
+
+    // Calculate world position for character to stand at
+    const localPos = new THREE.Vector3(x, 0.3, z)
+    const toCenter = new THREE.Vector3(-x, 0, -z).normalize()
+    localPos.add(toCenter.multiplyScalar(0.8)) // Closer to station than regular
+
+    const worldPos = localPos.clone()
+    zone.group.localToWorld(worldPos)
+
+    return {
+      category,
+      serverName,
+      position: worldPos,
+      localPosition: localPos,
+      mesh: stationGroup,
+      label: config.label,
+      slotIndex,
+    }
+  }
+
+  /**
+   * Create a label sprite for MCP station
+   */
+  private createMCPStationLabel(serverName: string, color: number): THREE.Sprite {
+    const canvas = document.createElement('canvas')
+    const ctx = canvas.getContext('2d')!
+
+    canvas.width = 256
+    canvas.height = 48
+
+    // Format server name (remove 'plugin_' prefix if present)
+    let displayName = serverName
+    if (displayName.startsWith('plugin_')) {
+      displayName = displayName.slice(7)
+    }
+    // Capitalize first letter
+    displayName = displayName.charAt(0).toUpperCase() + displayName.slice(1)
+
+    const fontSize = 20
+    ctx.font = `600 ${fontSize}px system-ui, -apple-system, sans-serif`
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+
+    const centerX = canvas.width / 2
+    const centerY = canvas.height / 2
+
+    // Convert hex color to CSS
+    const colorStr = '#' + color.toString(16).padStart(6, '0')
+
+    // Dark backdrop
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'
+    const textWidth = ctx.measureText(displayName).width
+    ctx.fillRect(centerX - textWidth / 2 - 10, centerY - 14, textWidth + 20, 28)
+
+    // Colored text
+    ctx.fillStyle = colorStr
+    ctx.fillText(displayName, centerX, centerY)
+
+    const texture = new THREE.CanvasTexture(canvas)
+    texture.minFilter = THREE.LinearFilter
+
+    const material = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthTest: false,
+    })
+    const sprite = new THREE.Sprite(material)
+    sprite.scale.set(2, 0.4, 1)
+
+    return sprite
+  }
+
+  /**
+   * Get MCP station for a server in a zone (or null if not exists)
+   */
+  getMCPStation(sessionId: string, serverName: string): MCPStation | null {
+    const zone = this.zones.get(sessionId)
+    if (!zone) return null
+    return zone.mcpStations.get(serverName) ?? null
+  }
+
+  /**
+   * Get all MCP stations for a zone
+   */
+  getMCPStations(sessionId: string): MCPStation[] {
+    const zone = this.zones.get(sessionId)
+    if (!zone) return []
+    return Array.from(zone.mcpStations.values())
+  }
+
   private setupLighting(): void {
     // Ambient light - increased to compensate for fewer lights
     const ambient = new THREE.AmbientLight(0x606080, 0.8)
@@ -2266,7 +2765,7 @@ export class WorkshopScene {
     const sun = new THREE.DirectionalLight(0xfff5e6, 1.2)
     sun.position.set(5, 10, 5)
     sun.castShadow = true
-    sun.shadow.mapSize.width = 512  // Reduced from 2048
+    sun.shadow.mapSize.width = 512 // Reduced from 2048
     sun.shadow.mapSize.height = 512
     sun.shadow.camera.near = 1
     sun.shadow.camera.far = 20
@@ -2291,7 +2790,7 @@ export class WorkshopScene {
   private createWorldFloor(): void {
     const floorGeometry = new THREE.PlaneGeometry(500, 500)
     const floorMaterial = new THREE.MeshBasicMaterial({
-      visible: false,  // Invisible - just for raycasting
+      visible: false, // Invisible - just for raycasting
     })
     const floor = new THREE.Mesh(floorGeometry, floorMaterial)
     floor.rotation.x = -Math.PI / 2
@@ -2344,11 +2843,7 @@ export class WorkshopScene {
             z + hexRadius * Math.sin(startAngle)
           )
           // End point
-          vertices.push(
-            x + hexRadius * Math.cos(endAngle),
-            0,
-            z + hexRadius * Math.sin(endAngle)
-          )
+          vertices.push(x + hexRadius * Math.cos(endAngle), 0, z + hexRadius * Math.sin(endAngle))
         }
       }
     }
@@ -2358,14 +2853,14 @@ export class WorkshopScene {
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3))
 
     const material = new THREE.LineBasicMaterial({
-      color: 0x4ac8e8,  // Cyan/ice blue
+      color: 0x4ac8e8, // Cyan/ice blue
       transparent: true,
       opacity: 0.35,
     })
 
     // ONE LineSegments object instead of ~127 Lines
     const lines = new THREE.LineSegments(geometry, material)
-    lines.position.y = 0.01  // Just above floor
+    lines.position.y = 0.01 // Just above floor
 
     this.scene.add(lines)
     this.worldHexGrid = lines
@@ -2438,6 +2933,11 @@ export class WorkshopScene {
       // Call render callbacks
       for (const callback of this.onRenderCallbacks) {
         callback(delta)
+      }
+
+      // Update LOD for zones (every 10 frames to save performance)
+      if (this.frameCount % 10 === 0) {
+        this.updateZoneLOD()
       }
 
       // Update ambient floating particles
@@ -2766,14 +3266,14 @@ export class WorkshopScene {
 
   private getStationColor(type: StationType): string {
     const colors: Record<StationType, string> = {
-      center: '#4ac8e8',    // Cyan (primary)
+      center: '#4ac8e8', // Cyan (primary)
       bookshelf: '#fbbf24', // Orange/gold for books
-      desk: '#4ade80',      // Green
+      desk: '#4ade80', // Green
       workbench: '#f97316', // Orange
-      terminal: '#22d3ee',  // Cyan
-      scanner: '#60a5fa',   // Blue
-      antenna: '#4ac8e8',   // Cyan
-      portal: '#22d3d8',    // Teal
+      terminal: '#22d3ee', // Cyan
+      scanner: '#60a5fa', // Blue
+      antenna: '#4ac8e8', // Cyan
+      portal: '#22d3d8', // Teal
       taskboard: '#fb923c', // Orange
     }
     return colors[type] || '#ffffff'
@@ -2838,11 +3338,13 @@ export class WorkshopScene {
         const points: THREE.Vector3[] = []
         for (let i = 0; i <= 6; i++) {
           const angle = (Math.PI / 3) * i - Math.PI / 2
-          points.push(new THREE.Vector3(
-            center.x + hexRadius * Math.cos(angle),
-            0.02,
-            center.z + hexRadius * Math.sin(angle)
-          ))
+          points.push(
+            new THREE.Vector3(
+              center.x + hexRadius * Math.cos(angle),
+              0.02,
+              center.z + hexRadius * Math.sin(angle)
+            )
+          )
         }
 
         const geometry = new THREE.BufferGeometry().setFromPoints(points)
@@ -2871,8 +3373,8 @@ export class WorkshopScene {
     const msPerRing = 45
 
     for (let r = 0; r <= maxRings; r++) {
-      const strength = Math.pow(0.6, r)  // Gentler: 1.0 -> 0.6 -> 0.36 -> 0.22 -> 0.13 -> 0.08 -> 0.05 -> 0.03
-      if (strength < 0.03) continue  // Skip if too dim
+      const strength = Math.pow(0.6, r) // Gentler: 1.0 -> 0.6 -> 0.36 -> 0.22 -> 0.13 -> 0.08 -> 0.05 -> 0.03
+      if (strength < 0.03) continue // Skip if too dim
       if (r === 0) {
         spawnHexRing(0, strength)
       } else {
@@ -2884,13 +3386,20 @@ export class WorkshopScene {
   /**
    * Get all hex coordinates in a ring at distance `ring` from center
    */
-  private getHexRing(center: { q: number; r: number }, ring: number): Array<{ q: number; r: number }> {
+  private getHexRing(
+    center: { q: number; r: number },
+    ring: number
+  ): Array<{ q: number; r: number }> {
     if (ring === 0) return [center]
 
     const results: Array<{ q: number; r: number }> = []
     const directions = [
-      { q: 1, r: 0 },   { q: 1, r: -1 },  { q: 0, r: -1 },
-      { q: -1, r: 0 },  { q: -1, r: 1 },  { q: 0, r: 1 },
+      { q: 1, r: 0 },
+      { q: 1, r: -1 },
+      { q: 0, r: -1 },
+      { q: -1, r: 0 },
+      { q: -1, r: 1 },
+      { q: 0, r: 1 },
     ]
 
     // Start at "east" corner
@@ -2917,7 +3426,7 @@ export class WorkshopScene {
       // Handle delay before animation starts
       if (pulse.delay && pulse.delay > 0) {
         pulse.delay -= delta
-        continue  // Don't animate yet
+        continue // Don't animate yet
       }
 
       pulse.age += delta
@@ -2969,8 +3478,8 @@ export class WorkshopScene {
       } else {
         // Animate opacity: 0.3s fade in, 0.5s hold, 0.5s fade out
         const mat = pulse.ring.material as THREE.MeshBasicMaterial
-        const fadeInEnd = 0.23  // 0.3 / 1.3
-        const holdEnd = 0.62   // (0.3 + 0.5) / 1.3
+        const fadeInEnd = 0.23 // 0.3 / 1.3
+        const holdEnd = 0.62 // (0.3 + 0.5) / 1.3
 
         let opacity: number
         if (progress < fadeInEnd) {
@@ -3017,7 +3526,7 @@ export class WorkshopScene {
       sprite,
       startY,
       age: 0,
-      maxAge: 3,  // 3 seconds
+      maxAge: 3, // 3 seconds
     })
   }
 
@@ -3092,14 +3601,12 @@ export class WorkshopScene {
         this.notifications.splice(i, 1)
       } else {
         // Animate: float up and fade out
-        const floatHeight = progress * 1.5  // Float up 1.5 units
+        const floatHeight = progress * 1.5 // Float up 1.5 units
         notif.sprite.position.y = notif.startY + floatHeight
 
         // Fade: stay visible for first 60%, then fade out
         const fadeStart = 0.6
-        const opacity = progress < fadeStart
-          ? 1
-          : 1 - ((progress - fadeStart) / (1 - fadeStart))
+        const opacity = progress < fadeStart ? 1 : 1 - (progress - fadeStart) / (1 - fadeStart)
         notif.sprite.material.opacity = opacity
       }
     }
@@ -3119,15 +3626,15 @@ export class WorkshopScene {
       if (sessionId && drawMode.is3DMode()) {
         return this.raiseZone(sessionId, 0.5)
       }
-      return false  // Can't paint on zones when 3D mode is off
+      return false // Can't paint on zones when 3D mode is off
     }
 
     const key = `${hex.q},${hex.r}`
     const existing = this.paintedHexes.get(key)
 
     // Determine new height
-    let newHeight = 0.5  // Base height for new hex
-    const maxHeight = 100  // Near-arbitrary cap for creative building
+    let newHeight = 0.5 // Base height for new hex
+    const maxHeight = 100 // Near-arbitrary cap for creative building
 
     if (existing) {
       if (existing.color === color && drawMode.is3DMode()) {
@@ -3183,7 +3690,12 @@ export class WorkshopScene {
     this.updateTextTileAtHex(hex)
 
     // Visual feedback when stacking (height increased in 3D mode)
-    if (existing && existing.color === color && newHeight > existing.height && drawMode.is3DMode()) {
+    if (
+      existing &&
+      existing.color === color &&
+      newHeight > existing.height &&
+      drawMode.is3DMode()
+    ) {
       this.spawnStackEffect(x, z, newHeight, color)
     }
 
@@ -3298,7 +3810,7 @@ export class WorkshopScene {
    * Get all painted hex meshes (for raycasting)
    */
   getPaintedHexMeshes(): THREE.Mesh[] {
-    return Array.from(this.paintedHexes.values()).map(data => data.mesh)
+    return Array.from(this.paintedHexes.values()).map((data) => data.mesh)
   }
 
   /**
@@ -3403,6 +3915,8 @@ export class WorkshopScene {
   dispose(): void {
     this.stop()
     this.clearAllContexts()
+    // Stop memory budget GC timer
+    memoryBudget.stop()
     // Clean up painted hexes (draw mode)
     this.clearAllPaintedHexes()
     // Clean up zone notifications (new system)

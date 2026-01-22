@@ -9,12 +9,7 @@
  * 2. Add it to STATION_ANIMATIONS with the station name as key
  */
 
-import {
-  type CharacterParts,
-  type WorkingBehavior,
-  easeInOut,
-  easeOut,
-} from './AnimationTypes'
+import { type CharacterParts, type WorkingBehavior, easeInOut, easeOut } from './AnimationTypes'
 
 // Re-export for convenience
 export type { WorkingBehavior } from './AnimationTypes'
@@ -40,17 +35,18 @@ const readingBook: WorkingBehavior = {
     parts.rightArm.rotation.z = 0.3
 
     // Eyes scan left to right (reading)
-    const readCycle = progress * 3  // 3 lines per cycle
+    const readCycle = progress * 3 // 3 lines per cycle
     const lineProgress = readCycle % 1
-    const eyeX = (lineProgress < 0.8)
-      ? -0.02 + easeInOut(lineProgress / 0.8) * 0.04  // Read left to right
-      : 0.02 - easeOut((lineProgress - 0.8) / 0.2) * 0.04  // Quick return
+    const eyeX =
+      lineProgress < 0.8
+        ? -0.02 + easeInOut(lineProgress / 0.8) * 0.04 // Read left to right
+        : 0.02 - easeOut((lineProgress - 0.8) / 0.2) * 0.04 // Quick return
 
     parts.leftEye.position.x = -0.07 + eyeX
     parts.rightEye.position.x = 0.07 + eyeX
 
     // Slight head tilt while reading
-    parts.head.rotation.x = 0.15  // Looking down at book
+    parts.head.rotation.x = 0.15 // Looking down at book
     parts.head.rotation.z = Math.sin(progress * Math.PI * 2) * 0.03
 
     // Occasional page flip (at progress 0.5)
@@ -65,7 +61,7 @@ const readingBook: WorkingBehavior = {
     parts.leftEye.position.x = -0.07
     parts.rightEye.position.x = 0.07
     parts.head.rotation.set(0, 0, 0)
-  }
+  },
 }
 
 /** Workbench (Edit) - Using tools, tinkering */
@@ -104,7 +100,7 @@ const tinkering: WorkingBehavior = {
     parts.body.rotation.x = 0
     parts.leftEye.position.y = 0.03
     parts.rightEye.position.y = 0.03
-  }
+  },
 }
 
 /** Desk (Write) - Writing, thinking, scratching head */
@@ -132,9 +128,9 @@ const writing: WorkingBehavior = {
     // Occasional pause to think (every cycle)
     const thinkPause = Math.floor(writeCycle) % 3 === 2
     if (thinkPause && writePhase < 0.5) {
-      parts.head.rotation.x = 0.05  // Look up thinking
+      parts.head.rotation.x = 0.05 // Look up thinking
       parts.head.rotation.z = 0.1
-      parts.rightArm.rotation.x = -0.8  // Pause writing
+      parts.rightArm.rotation.x = -0.8 // Pause writing
     }
 
     // Eyes follow writing
@@ -147,7 +143,7 @@ const writing: WorkingBehavior = {
     parts.head.rotation.set(0, 0, 0)
     parts.leftEye.position.x = -0.07
     parts.rightEye.position.x = 0.07
-  }
+  },
 }
 
 /** Terminal (Bash) - Typing rapidly, looking at screen */
@@ -157,7 +153,7 @@ const typing: WorkingBehavior = {
   duration: 2,
   update: (parts, progress) => {
     // Both arms in typing position
-    const typeCycle = progress * 12  // Fast typing
+    const typeCycle = progress * 12 // Fast typing
     const typePhase = typeCycle % 1
 
     // Alternating arm typing motions
@@ -177,7 +173,7 @@ const typing: WorkingBehavior = {
     // Occasional head nod (understanding output)
     const nodCycle = Math.floor(progress * 4) % 4
     if (nodCycle === 3) {
-      parts.head.rotation.x = Math.sin((progress * 4 % 1) * Math.PI) * 0.1
+      parts.head.rotation.x = Math.sin(((progress * 4) % 1) * Math.PI) * 0.1
     }
 
     // Slight forward lean (focused)
@@ -190,7 +186,7 @@ const typing: WorkingBehavior = {
     parts.rightEye.position.x = 0.07
     parts.head.rotation.x = 0
     parts.body.rotation.x = 0
-  }
+  },
 }
 
 /** Scanner (Grep/Glob) - Scanning, searching, peering */
@@ -239,7 +235,7 @@ const scanning: WorkingBehavior = {
     parts.rightEye.scale.setScalar(1)
     parts.leftEye.position.x = -0.07
     parts.rightEye.position.x = 0.07
-  }
+  },
 }
 
 /** Antenna (WebFetch/WebSearch) - Receiving signals, tuning */
@@ -278,7 +274,7 @@ const receiving: WorkingBehavior = {
     parts.head.rotation.set(0, 0, 0)
     parts.leftEye.position.y = 0.03
     parts.rightEye.position.y = 0.03
-  }
+  },
 }
 
 /** Portal (Task) - Mystical gestures, channeling energy */
@@ -323,7 +319,7 @@ const channeling: WorkingBehavior = {
     parts.leftEye.scale.setScalar(1)
     parts.rightEye.scale.setScalar(1)
     parts.antenna.rotation.set(0, 0, 0)
-  }
+  },
 }
 
 /** Taskboard (TodoWrite) - Checking items, pointing at board */
@@ -332,7 +328,7 @@ const checkingTasks: WorkingBehavior = {
   loop: true,
   duration: 3.5,
   update: (parts, progress) => {
-    const taskCycle = progress * 3  // Check 3 items
+    const taskCycle = progress * 3 // Check 3 items
     const taskPhase = taskCycle % 1
     const taskIndex = Math.floor(taskCycle) % 3
 
@@ -373,8 +369,212 @@ const checkingTasks: WorkingBehavior = {
     parts.head.rotation.set(0, 0, 0)
     parts.leftEye.position.y = 0.03
     parts.rightEye.position.y = 0.03
-  }
+  },
 }
+
+// ============================================================================
+// MCP Tool Animations
+// ============================================================================
+
+/** Browser automation (mcp__playwright__*) - Clicking, pointing at screen */
+const browserAutomation: WorkingBehavior = {
+  name: 'browserAutomation',
+  loop: true,
+  duration: 2.5,
+  update: (parts, progress) => {
+    // One arm pointing/clicking at screen
+    const clickCycle = progress * 4
+    const clickPhase = clickCycle % 1
+
+    // Point at different screen positions
+    const screenX = Math.sin(progress * Math.PI * 2) * 0.3
+    const screenY = Math.cos(progress * Math.PI * 1.5) * 0.2
+
+    parts.rightArm.rotation.x = -1.6 + screenY * 0.3
+    parts.rightArm.rotation.y = screenX * 0.4
+    parts.rightArm.rotation.z = 0.2
+
+    // Click motion (quick jab forward)
+    if (clickPhase > 0.7 && clickPhase < 0.9) {
+      const clickProgress = (clickPhase - 0.7) / 0.2
+      parts.rightArm.rotation.x -= Math.sin(clickProgress * Math.PI) * 0.3
+    }
+
+    // Other arm at side, occasionally scrolling
+    parts.leftArm.rotation.x = -0.3
+    if (Math.floor(clickCycle) % 3 === 2) {
+      // Scroll gesture
+      parts.leftArm.rotation.x = -0.8 + Math.sin(clickPhase * Math.PI * 2) * 0.3
+    }
+
+    // Head follows pointer
+    parts.head.rotation.y = screenX * 0.2
+    parts.head.rotation.x = screenY * 0.15
+
+    // Eyes tracking movement
+    parts.leftEye.position.x = -0.07 + screenX * 0.02
+    parts.rightEye.position.x = 0.07 + screenX * 0.02
+    parts.leftEye.position.y = 0.03 + screenY * 0.01
+    parts.rightEye.position.y = 0.03 + screenY * 0.01
+
+    // Body slight lean forward
+    parts.body.rotation.x = 0.08
+  },
+  reset: (parts) => {
+    parts.leftArm.rotation.set(0, 0, 0)
+    parts.rightArm.rotation.set(0, 0, 0)
+    parts.head.rotation.set(0, 0, 0)
+    parts.body.rotation.x = 0
+    parts.leftEye.position.set(-0.07, 0.03, 0.242)
+    parts.rightEye.position.set(0.07, 0.03, 0.242)
+  },
+}
+
+/** Database query (mcp__*__query*) - Searching through data */
+const databaseQuery: WorkingBehavior = {
+  name: 'databaseQuery',
+  loop: true,
+  duration: 3,
+  update: (parts, progress) => {
+    // Sorting through data pose
+    const sortCycle = progress * 5
+    const sortPhase = sortCycle % 1
+
+    // Arms sorting motion (shuffling through files)
+    const leftOffset = Math.sin(sortPhase * Math.PI * 2) * 0.2
+    const rightOffset = Math.sin((sortPhase + 0.5) * Math.PI * 2) * 0.2
+
+    parts.leftArm.rotation.x = -0.9 + leftOffset
+    parts.leftArm.rotation.z = -0.3
+    parts.rightArm.rotation.x = -0.9 + rightOffset
+    parts.rightArm.rotation.z = 0.3
+
+    // Head scanning data
+    const scanProgress = progress * 2
+    parts.head.rotation.y = Math.sin(scanProgress * Math.PI) * 0.25
+    parts.head.rotation.x = 0.1 + Math.sin(progress * Math.PI * 4) * 0.05
+
+    // Eyes rapidly scanning
+    const scanX = Math.sin(progress * Math.PI * 8) * 0.025
+    parts.leftEye.position.x = -0.07 + scanX
+    parts.rightEye.position.x = 0.07 + scanX
+
+    // Antenna twitching (processing)
+    parts.antenna.rotation.z = Math.sin(progress * Math.PI * 6) * 0.15
+    parts.antenna.rotation.x = Math.cos(progress * Math.PI * 4) * 0.1
+
+    // Slight body movement
+    parts.body.rotation.y = Math.sin(scanProgress * Math.PI) * 0.08
+  },
+  reset: (parts) => {
+    parts.leftArm.rotation.set(0, 0, 0)
+    parts.rightArm.rotation.set(0, 0, 0)
+    parts.head.rotation.set(0, 0, 0)
+    parts.body.rotation.y = 0
+    parts.antenna.rotation.set(0, 0, 0)
+    parts.leftEye.position.x = -0.07
+    parts.rightEye.position.x = 0.07
+  },
+}
+
+/** Memory operations (mcp__*memory*__*) - Contemplative, accessing memories */
+const memoryAccess: WorkingBehavior = {
+  name: 'memoryAccess',
+  loop: true,
+  duration: 3.5,
+  update: (parts, progress) => {
+    // Contemplative pose - hand to head, thinking
+    const thinkPulse = Math.sin(progress * Math.PI * 2)
+
+    // Right hand to head (accessing memory)
+    parts.rightArm.rotation.x = -2.0
+    parts.rightArm.rotation.z = 0.6
+    parts.rightArm.rotation.y = 0.2 + thinkPulse * 0.1
+
+    // Left arm relaxed at side
+    parts.leftArm.rotation.x = -0.1 + thinkPulse * 0.05
+    parts.leftArm.rotation.z = -0.1
+
+    // Head tilted, thinking
+    parts.head.rotation.z = 0.12 + thinkPulse * 0.03
+    parts.head.rotation.y = Math.sin(progress * Math.PI) * 0.1
+
+    // Eyes looking up (accessing memories)
+    parts.leftEye.position.y = 0.03 + 0.015
+    parts.rightEye.position.y = 0.03 + 0.015
+
+    // Slow eye movement
+    const eyeX = Math.sin(progress * Math.PI * 1.5) * 0.015
+    parts.leftEye.position.x = -0.07 + eyeX
+    parts.rightEye.position.x = 0.07 + eyeX
+
+    // Antenna glowing/pulsing (memory access)
+    const glowPulse = 1 + Math.sin(progress * Math.PI * 4) * 0.1
+    parts.antenna.rotation.x = -0.15 + Math.sin(progress * Math.PI * 3) * 0.08
+
+    // Eye glow effect during memory access
+    parts.leftEye.scale.setScalar(glowPulse)
+    parts.rightEye.scale.setScalar(glowPulse)
+  },
+  reset: (parts) => {
+    parts.leftArm.rotation.set(0, 0, 0)
+    parts.rightArm.rotation.set(0, 0, 0)
+    parts.head.rotation.set(0, 0, 0)
+    parts.antenna.rotation.x = 0
+    parts.leftEye.position.set(-0.07, 0.03, 0.242)
+    parts.rightEye.position.set(0.07, 0.03, 0.242)
+    parts.leftEye.scale.setScalar(1)
+    parts.rightEye.scale.setScalar(1)
+  },
+}
+
+/** API/external service calls - Sending signals outward */
+const apiCalling: WorkingBehavior = {
+  name: 'apiCalling',
+  loop: true,
+  duration: 2,
+  update: (parts, progress) => {
+    // Sending/receiving pose
+    const signalCycle = progress * 3
+    const signalPhase = signalCycle % 1
+
+    // Both arms in broadcasting pose
+    const broadcast = Math.sin(signalPhase * Math.PI)
+
+    parts.leftArm.rotation.x = -1.2 - broadcast * 0.3
+    parts.leftArm.rotation.z = -0.5 - broadcast * 0.2
+    parts.rightArm.rotation.x = -1.2 - broadcast * 0.3
+    parts.rightArm.rotation.z = 0.5 + broadcast * 0.2
+
+    // Antenna actively transmitting
+    parts.antenna.rotation.z = Math.sin(progress * Math.PI * 12) * 0.25
+    parts.antenna.rotation.x = -0.2 + broadcast * 0.15
+
+    // Head alert, watching for response
+    parts.head.rotation.x = -0.1
+    parts.head.rotation.y = Math.sin(progress * Math.PI * 4) * 0.1
+
+    // Eyes wide, alert
+    parts.leftEye.scale.setScalar(1.1)
+    parts.rightEye.scale.setScalar(1.1)
+
+    // Body slight pulse with transmission
+    parts.body.rotation.x = broadcast * 0.03
+  },
+  reset: (parts) => {
+    parts.leftArm.rotation.set(0, 0, 0)
+    parts.rightArm.rotation.set(0, 0, 0)
+    parts.antenna.rotation.set(0, 0, 0)
+    parts.head.rotation.set(0, 0, 0)
+    parts.body.rotation.x = 0
+    parts.leftEye.scale.setScalar(1)
+    parts.rightEye.scale.setScalar(1)
+  },
+}
+
+// ============================================================================
+// Generic and Fallback Animations
+// ============================================================================
 
 /** Generic working animation for unmapped stations */
 const genericWorking: WorkingBehavior = {
@@ -399,7 +599,7 @@ const genericWorking: WorkingBehavior = {
     parts.rightArm.rotation.set(0, 0, 0)
     parts.body.rotation.x = 0
     parts.head.rotation.set(0, 0, 0)
-  }
+  },
 }
 
 // ============================================================================
@@ -415,7 +615,69 @@ export const STATION_ANIMATIONS: StationAnimations = {
   antenna: receiving,
   portal: channeling,
   taskboard: checkingTasks,
-  center: genericWorking,  // Default for center station
+  center: genericWorking, // Default for center station
+}
+
+/**
+ * MCP tool category to animation mapping
+ * Used when tool name matches mcp__* pattern
+ */
+export const MCP_CATEGORY_ANIMATIONS: StationAnimations = {
+  browser: browserAutomation, // mcp__playwright__*
+  database: databaseQuery, // mcp__*__query*, mcp__*__search*
+  memory: memoryAccess, // mcp__*memory*__*
+  api: apiCalling, // mcp__*__fetch*, mcp__*__get*
+  filesystem: scanning, // mcp__serena__* (uses scanner animation)
+  search: scanning, // mcp__context7__* (uses scanner animation)
+}
+
+/**
+ * Get animation for MCP tool based on tool name pattern
+ * Returns appropriate animation or null for default handling
+ */
+export function getMCPAnimation(toolName: string): WorkingBehavior | null {
+  const lowerTool = toolName.toLowerCase()
+
+  // Browser automation
+  if (lowerTool.includes('playwright') || lowerTool.includes('browser')) {
+    return browserAutomation
+  }
+
+  // Memory operations
+  if (lowerTool.includes('memory') || lowerTool.includes('openmemory')) {
+    return memoryAccess
+  }
+
+  // Database/query operations
+  if (
+    lowerTool.includes('query') ||
+    lowerTool.includes('pinecone') ||
+    lowerTool.includes('database') ||
+    lowerTool.includes('search-records')
+  ) {
+    return databaseQuery
+  }
+
+  // API/fetch operations
+  if (
+    lowerTool.includes('fetch') ||
+    lowerTool.includes('firebase') ||
+    lowerTool.includes('greptile')
+  ) {
+    return apiCalling
+  }
+
+  // Filesystem (serena)
+  if (lowerTool.includes('serena')) {
+    return scanning
+  }
+
+  // Documentation search (context7)
+  if (lowerTool.includes('context7')) {
+    return scanning
+  }
+
+  return null
 }
 
 // ============================================================================
@@ -426,19 +688,34 @@ export class WorkingBehaviorManager {
   private currentBehavior: WorkingBehavior | null = null
   private behaviorProgress = 0
   private currentStation: string | null = null
+  private currentTool: string | null = null
 
   /**
    * Start a working animation for a specific station
+   * @param station - The station name
+   * @param parts - Character parts to animate
+   * @param toolName - Optional tool name for MCP-specific animations
    */
-  start(station: string, parts: CharacterParts): void {
+  start(station: string, parts: CharacterParts, toolName?: string): void {
     // Stop current behavior if any
     if (this.currentBehavior) {
       this.currentBehavior.reset?.(parts)
     }
 
-    // Get animation for this station
-    this.currentBehavior = STATION_ANIMATIONS[station] ?? STATION_ANIMATIONS.center
+    // Check for MCP-specific animation first
+    let behavior: WorkingBehavior | null = null
+    if (toolName && toolName.startsWith('mcp__')) {
+      behavior = getMCPAnimation(toolName)
+    }
+
+    // Fall back to station animation if no MCP animation found
+    if (!behavior) {
+      behavior = STATION_ANIMATIONS[station] ?? STATION_ANIMATIONS.center
+    }
+
+    this.currentBehavior = behavior
     this.currentStation = station
+    this.currentTool = toolName ?? null
     this.behaviorProgress = 0
 
     // Store original positions

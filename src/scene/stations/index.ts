@@ -17,3 +17,6 @@ export { addScannerDetails } from './ScannerStation'
 export { addDeskDetails } from './DeskStation'
 export { addWorkbenchDetails } from './WorkbenchStation'
 export { addTaskboardDetails } from './TaskboardStation'
+
+// MCP dynamic stations
+export { addMCPStationDetails, MCP_STATION_CONFIGS } from './MCPStation'

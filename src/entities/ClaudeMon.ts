@@ -23,6 +23,83 @@ import {
 export type ClaudeState = CharacterState
 export type ClaudeOptions = CharacterOptions
 
+// ============================================================================
+// Mood System Types
+// ============================================================================
+
+/**
+ * Character mood affects visual appearance and animation selection
+ * Derived from recent success/failure rate of tool operations
+ */
+export type CharacterMood = 'happy' | 'focused' | 'frustrated' | 'excited' | 'tired'
+
+/**
+ * Mood state tracking
+ */
+export interface MoodState {
+  current: CharacterMood
+  successRate: number // Rolling average 0-1
+  recentResults: boolean[] // Last N results for rolling average
+  consecutiveSuccesses: number
+  consecutiveFailures: number
+  lastMoodChange: number // timestamp
+}
+
+/**
+ * Mood visual configuration
+ */
+interface MoodVisuals {
+  eyeColor: number
+  eyeScale: number
+  ringColor: number
+  ringSaturation: number // 0-1, affects opacity
+  idleWeightMultiplier: number // Affects which idle animations play
+}
+
+/**
+ * Mood to visual mapping
+ */
+const MOOD_VISUALS: Record<CharacterMood, MoodVisuals> = {
+  happy: {
+    eyeColor: 0x4ade80, // Green - success
+    eyeScale: 1.05,
+    ringColor: 0x4ade80,
+    ringSaturation: 0.7,
+    idleWeightMultiplier: 1.2, // More likely to dance
+  },
+  focused: {
+    eyeColor: 0x67e8f9, // Cyan - default
+    eyeScale: 1.0,
+    ringColor: 0x67e8f9,
+    ringSaturation: 0.5,
+    idleWeightMultiplier: 1.0,
+  },
+  frustrated: {
+    eyeColor: 0xfb7185, // Red/pink - errors
+    eyeScale: 0.95,
+    ringColor: 0xfb7185,
+    ringSaturation: 0.6,
+    idleWeightMultiplier: 0.8, // Less playful
+  },
+  excited: {
+    eyeColor: 0xfbbf24, // Amber - high success streak
+    eyeScale: 1.15,
+    ringColor: 0xfbbf24,
+    ringSaturation: 0.8,
+    idleWeightMultiplier: 1.5, // Very playful
+  },
+  tired: {
+    eyeColor: 0x94a3b8, // Gray/slate - many operations
+    eyeScale: 0.9,
+    ringColor: 0x94a3b8,
+    ringSaturation: 0.3,
+    idleWeightMultiplier: 0.5, // Subdued animations
+  },
+}
+
+const MOOD_HISTORY_SIZE = 10 // Number of recent results to track
+const MOOD_CHANGE_COOLDOWN = 3000 // Min ms between mood changes
+
 const DEFAULT_OPTIONS: Required<ClaudeOptions> = {
   scale: 1,
   color: 0x2a3a4a, // Dark blue-gray metal
@@ -62,6 +139,10 @@ export class Claude implements ICharacter {
   private idleBehaviorManager: IdleBehaviorManager
   private workingBehaviorManager: WorkingBehaviorManager
 
+  // Mood system
+  private moodState: MoodState
+  private totalOperations = 0
+
   constructor(scene: WorkshopScene, options: ClaudeOptions = {}) {
     this.scene = scene
     this.options = { ...DEFAULT_OPTIONS, ...options }
@@ -93,6 +174,16 @@ export class Claude implements ICharacter {
     // Initialize behavior systems
     this.idleBehaviorManager = new IdleBehaviorManager()
     this.workingBehaviorManager = new WorkingBehaviorManager()
+
+    // Initialize mood state
+    this.moodState = {
+      current: 'focused',
+      successRate: 1.0, // Start optimistic
+      recentResults: [],
+      consecutiveSuccesses: 0,
+      consecutiveFailures: 0,
+      lastMoodChange: Date.now(),
+    }
 
     // Apply scale
     this.mesh.scale.setScalar(this.options.scale)
@@ -153,19 +244,19 @@ export class Claude implements ICharacter {
 
     // LED Eyes - rounded rectangle shape (like LED displays)
     const eyeShape = new THREE.Shape()
-    const eyeW = 0.032  // width
-    const eyeH = 0.045  // height (taller than wide)
-    const eyeR = 0.012  // corner radius
+    const eyeW = 0.032 // width
+    const eyeH = 0.045 // height (taller than wide)
+    const eyeR = 0.012 // corner radius
     // Draw rounded rectangle
-    eyeShape.moveTo(-eyeW/2 + eyeR, -eyeH/2)
-    eyeShape.lineTo(eyeW/2 - eyeR, -eyeH/2)
-    eyeShape.quadraticCurveTo(eyeW/2, -eyeH/2, eyeW/2, -eyeH/2 + eyeR)
-    eyeShape.lineTo(eyeW/2, eyeH/2 - eyeR)
-    eyeShape.quadraticCurveTo(eyeW/2, eyeH/2, eyeW/2 - eyeR, eyeH/2)
-    eyeShape.lineTo(-eyeW/2 + eyeR, eyeH/2)
-    eyeShape.quadraticCurveTo(-eyeW/2, eyeH/2, -eyeW/2, eyeH/2 - eyeR)
-    eyeShape.lineTo(-eyeW/2, -eyeH/2 + eyeR)
-    eyeShape.quadraticCurveTo(-eyeW/2, -eyeH/2, -eyeW/2 + eyeR, -eyeH/2)
+    eyeShape.moveTo(-eyeW / 2 + eyeR, -eyeH / 2)
+    eyeShape.lineTo(eyeW / 2 - eyeR, -eyeH / 2)
+    eyeShape.quadraticCurveTo(eyeW / 2, -eyeH / 2, eyeW / 2, -eyeH / 2 + eyeR)
+    eyeShape.lineTo(eyeW / 2, eyeH / 2 - eyeR)
+    eyeShape.quadraticCurveTo(eyeW / 2, eyeH / 2, eyeW / 2 - eyeR, eyeH / 2)
+    eyeShape.lineTo(-eyeW / 2 + eyeR, eyeH / 2)
+    eyeShape.quadraticCurveTo(-eyeW / 2, eyeH / 2, -eyeW / 2, eyeH / 2 - eyeR)
+    eyeShape.lineTo(-eyeW / 2, -eyeH / 2 + eyeR)
+    eyeShape.quadraticCurveTo(-eyeW / 2, -eyeH / 2, -eyeW / 2 + eyeR, -eyeH / 2)
 
     const eyeGeometry = new THREE.ShapeGeometry(eyeShape)
     const eyeMaterial = new THREE.MeshBasicMaterial({
@@ -566,13 +657,16 @@ export class Claude implements ICharacter {
     const rightEyeMat = this.rightEye.material as THREE.MeshBasicMaterial
 
     switch (this.state) {
-      case 'idle':
-        material.color.setHex(0x4ade80) // Green
-        material.opacity = 0.5
-        antennaMaterial.color.setHex(0x4ade80)
-        leftEyeMat.color.setHex(0x67e8f9)
-        rightEyeMat.color.setHex(0x67e8f9)
+      case 'idle': {
+        // Use mood-based colors when idle
+        const moodVisuals = MOOD_VISUALS[this.moodState.current]
+        material.color.setHex(moodVisuals.ringColor)
+        material.opacity = moodVisuals.ringSaturation
+        antennaMaterial.color.setHex(moodVisuals.eyeColor)
+        leftEyeMat.color.setHex(moodVisuals.eyeColor)
+        rightEyeMat.color.setHex(moodVisuals.eyeColor)
         break
+      }
       case 'walking':
         material.color.setHex(0x60a5fa) // Blue
         material.opacity = 0.6
@@ -801,6 +895,153 @@ export class Claude implements ICharacter {
     this.setState('working')
   }
 
+  // ============================================================================
+  // Mood System API
+  // ============================================================================
+
+  /**
+   * Record a tool operation result to update mood
+   * Call this from event handlers when post_tool_use events arrive
+   */
+  recordToolResult(success: boolean): void {
+    this.totalOperations++
+
+    // Update recent results (rolling window)
+    this.moodState.recentResults.push(success)
+    if (this.moodState.recentResults.length > MOOD_HISTORY_SIZE) {
+      this.moodState.recentResults.shift()
+    }
+
+    // Update consecutive counters
+    if (success) {
+      this.moodState.consecutiveSuccesses++
+      this.moodState.consecutiveFailures = 0
+    } else {
+      this.moodState.consecutiveFailures++
+      this.moodState.consecutiveSuccesses = 0
+    }
+
+    // Calculate new success rate
+    if (this.moodState.recentResults.length > 0) {
+      const successes = this.moodState.recentResults.filter((r) => r).length
+      this.moodState.successRate = successes / this.moodState.recentResults.length
+    }
+
+    // Determine new mood
+    this.updateMood()
+  }
+
+  /**
+   * Update mood based on current state
+   */
+  private updateMood(): void {
+    const now = Date.now()
+    const timeSinceLastChange = now - this.moodState.lastMoodChange
+
+    // Cooldown prevents jarring rapid mood changes
+    if (timeSinceLastChange < MOOD_CHANGE_COOLDOWN) {
+      return
+    }
+
+    const oldMood = this.moodState.current
+    let newMood: CharacterMood = 'focused' // Default
+
+    // Check for excited (high success streak)
+    if (this.moodState.consecutiveSuccesses >= 5) {
+      newMood = 'excited'
+    }
+    // Check for happy (good success rate)
+    else if (this.moodState.successRate >= 0.8 && this.moodState.recentResults.length >= 3) {
+      newMood = 'happy'
+    }
+    // Check for frustrated (consecutive failures or low rate)
+    else if (this.moodState.consecutiveFailures >= 3 || this.moodState.successRate < 0.4) {
+      newMood = 'frustrated'
+    }
+    // Check for tired (many operations)
+    else if (this.totalOperations > 50 && this.moodState.successRate < 0.7) {
+      newMood = 'tired'
+    }
+    // Default to focused
+    else {
+      newMood = 'focused'
+    }
+
+    // Apply mood change
+    if (newMood !== oldMood) {
+      this.moodState.current = newMood
+      this.moodState.lastMoodChange = now
+      this.applyMoodVisuals()
+    }
+  }
+
+  /**
+   * Apply visual changes based on current mood
+   * Called when mood changes
+   */
+  private applyMoodVisuals(): void {
+    const visuals = MOOD_VISUALS[this.moodState.current]
+
+    // Update base eye colors (will be overridden by state in updateStatusColor)
+    // This affects idle state specifically
+    if (this.state === 'idle') {
+      const leftEyeMat = this.leftEye.material as THREE.MeshBasicMaterial
+      const rightEyeMat = this.rightEye.material as THREE.MeshBasicMaterial
+      leftEyeMat.color.setHex(visuals.eyeColor)
+      rightEyeMat.color.setHex(visuals.eyeColor)
+    }
+
+    // Store mood scale for animation system to use
+    this.mesh.userData.moodEyeScale = visuals.eyeScale
+    this.mesh.userData.moodIdleMultiplier = visuals.idleWeightMultiplier
+  }
+
+  /**
+   * Get current mood (for external queries)
+   */
+  getMood(): CharacterMood {
+    return this.moodState.current
+  }
+
+  /**
+   * Get full mood state (for debugging/UI)
+   */
+  getMoodState(): Readonly<MoodState> {
+    return { ...this.moodState }
+  }
+
+  /**
+   * Get mood visuals (for external systems like zone status)
+   */
+  getMoodVisuals(): MoodVisuals {
+    return MOOD_VISUALS[this.moodState.current]
+  }
+
+  /**
+   * Reset mood to default (e.g., when session restarts)
+   */
+  resetMood(): void {
+    this.moodState = {
+      current: 'focused',
+      successRate: 1.0,
+      recentResults: [],
+      consecutiveSuccesses: 0,
+      consecutiveFailures: 0,
+      lastMoodChange: Date.now(),
+    }
+    this.totalOperations = 0
+    this.applyMoodVisuals()
+  }
+
+  /**
+   * Force a specific mood (for testing/events)
+   */
+  setMood(mood: CharacterMood): void {
+    this.moodState.current = mood
+    this.moodState.lastMoodChange = Date.now()
+    this.applyMoodVisuals()
+  }
+
   dispose(): void {
     if (this.updateCallback) {
       this.scene.offRender(this.updateCallback)
@@ -814,7 +1055,7 @@ export class Claude implements ICharacter {
       if (obj instanceof THREE.Mesh || obj instanceof THREE.Line) {
         obj.geometry.dispose()
         if (Array.isArray(obj.material)) {
-          obj.material.forEach(m => m.dispose())
+          obj.material.forEach((m) => m.dispose())
         } else if (obj.material) {
           obj.material.dispose()
         }
