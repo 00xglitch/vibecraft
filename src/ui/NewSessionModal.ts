@@ -10,7 +10,6 @@ import {
   createModelSelect,
   getCachedProviders,
   type OpenCodeProvider,
-  type OpenCodeModel,
 } from './OpenCodeProviderSelect.js'
 import { setupDirectoryAutocomplete } from './DirectoryAutocomplete'
 
@@ -19,6 +18,8 @@ export interface SessionFlags {
   skipPermissions?: boolean
   chrome?: boolean
   worktree?: boolean
+  model?: string // Model ID: 'sonnet', 'opus', 'haiku'
+  thinking?: boolean // Enable extended thinking mode
 }
 
 export interface NewSessionModal {
@@ -35,15 +36,24 @@ export function setupNewSessionModal(
   container: HTMLElement,
   callbacks: {
     onClaudeSession: (name: string, cwd: string, flags: SessionFlags) => void
-    onOpenCodeSession: (data: { name?: string, cwd?: string, providerID: string, modelID: string }) => void
+    onOpenCodeSession: (data: {
+      name?: string
+      cwd?: string
+      providerID: string
+      modelID: string
+    }) => void
   }
 ): NewSessionModal {
   // DOM elements
   const modal = document.getElementById('new-session-modal') as HTMLElement | null
   const nameInput = document.getElementById('session-name-input') as HTMLInputElement | null
   const cwdInput = document.getElementById('session-cwd-input') as HTMLInputElement | null
-  const claudeTab = modal?.querySelector('.session-type-tab[data-type="claude"]') as HTMLButtonElement | null
-  const opencodeTab = modal?.querySelector('.session-type-tab[data-type="opencode"]') as HTMLButtonElement | null
+  const claudeTab = modal?.querySelector(
+    '.session-type-tab[data-type="claude"]'
+  ) as HTMLButtonElement | null
+  const opencodeTab = modal?.querySelector(
+    '.session-type-tab[data-type="opencode"]'
+  ) as HTMLButtonElement | null
   const claudeOptions = document.getElementById('claude-options')
   const opencodeOptions = document.getElementById('opencode-options')
   const opencodeModelField = document.getElementById('opencode-model-field')
@@ -59,7 +69,9 @@ export function setupNewSessionModal(
   let opencodeInitialized = false
 
   // Initialize provider/model selects
-  const initializeOpenCodeSelects = (onProviderSelect: (provider: OpenCodeProvider) => void): void => {
+  const initializeOpenCodeSelects = (
+    onProviderSelect: (provider: OpenCodeProvider) => void
+  ): void => {
     if (providerSelect && modelSelect) {
       console.log('[NewSession] Selects already initialized, reusing...')
       return
@@ -86,7 +98,7 @@ export function setupNewSessionModal(
       const models = Object.values(provider.models)
       const modelOptions: SelectOption[] = [
         { id: '', label: '-- Default --' },
-        ...models.map(m => ({ id: m.id, label: `${m.name} (${m.status})` })),
+        ...models.map((m) => ({ id: m.id, label: `${m.name} (${m.status})` })),
       ]
       modelSelect?.setOptions(modelOptions)
       modelSelect?.setDisabled(false)
@@ -102,13 +114,13 @@ export function setupNewSessionModal(
     providerSelect.input.addEventListener('focus', () => {
       if (getCachedProviders().length === 0) {
         fetchOpenCodeProviders()
-          .then(providers => {
+          .then((providers) => {
             if (providerSelect) {
-              providerSelect.setOptions(providers.map(p => ({ id: p.id, label: p.name })))
+              providerSelect.setOptions(providers.map((p) => ({ id: p.id, label: p.name })))
               providerSelect.setDisabled(false)
             }
           })
-          .catch(err => console.error('[NewSession] Failed to fetch providers:', err))
+          .catch((err) => console.error('[NewSession] Failed to fetch providers:', err))
       }
     })
 
@@ -162,9 +174,9 @@ export function setupNewSessionModal(
 
       providerSelect?.setDisabled(false)
       fetchOpenCodeProviders()
-        .then(providers => {
+        .then((providers) => {
           console.log('[NewSession] Providers fetched:', providers.length)
-          providerSelect?.setOptions(providers.map(p => ({ id: p.id, label: p.name })))
+          providerSelect?.setOptions(providers.map((p) => ({ id: p.id, label: p.name })))
         })
         .catch((err: unknown) => console.error('[NewSession] Failed to fetch providers:', err))
     }
@@ -191,18 +203,22 @@ export function setupNewSessionModal(
         name,
         cwd,
         providerID: providerId,
-        modelID: modelId ?? ''
+        modelID: modelId ?? '',
       })
     } else {
       // Read flag checkboxes
       const continueCheck = document.getElementById('session-opt-continue') as HTMLInputElement
       const skipPermsCheck = document.getElementById('session-opt-skip-perms') as HTMLInputElement
       const chromeCheck = document.getElementById('session-opt-chrome') as HTMLInputElement
+      const thinkingCheck = document.getElementById('session-opt-thinking') as HTMLInputElement
+      const modelSelect = document.getElementById('session-opt-model') as HTMLSelectElement
 
       const flags: SessionFlags = {
         continue: continueCheck?.checked ?? true,
         skipPermissions: skipPermsCheck?.checked ?? true,
         chrome: chromeCheck?.checked ?? false,
+        thinking: thinkingCheck?.checked ?? false,
+        model: modelSelect?.value || undefined,
       }
 
       // Create Claude session
@@ -214,7 +230,7 @@ export function setupNewSessionModal(
   const handleCancel = (): void => {
     // Play cancel sound if soundManager is available
     if (typeof window !== 'undefined' && 'soundManager' in window) {
-      // @ts-ignore - soundManager type
+      // @ts-expect-error - soundManager is added dynamically
       window.soundManager.play('modal_cancel')
     }
     modal?.classList.remove('visible')
@@ -242,8 +258,8 @@ export function setupNewSessionModal(
           const basename = cwd.replace(/\/+$/, '').split('/').pop() || ''
           if (basename) {
             // Check for duplicate names and add suffix if needed
-            let name = basename
-            let suffix = 1
+            const name = basename
+            // Note: suffix would be used for duplicate detection
             // Note: state.managedSessions check would require passing state as parameter
             // For now, use simple duplicate prevention
             // In main.ts integration, this will be handled by the caller
@@ -274,7 +290,7 @@ export function setupNewSessionModal(
     },
     getState: () => ({
       providerSelect,
-      modelSelect
-    })
+      modelSelect,
+    }),
   }
 }

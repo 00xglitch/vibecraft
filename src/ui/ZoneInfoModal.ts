@@ -8,10 +8,8 @@
 import type { ManagedSession, GitStatus } from '../../shared/types'
 import { soundManager } from '../audio'
 import { formatTimeAgo } from './FeedManager'
-import {
-  SearchableSelect,
-  type SelectOption,
-} from './SearchableSelect'
+import { mcpRegistry } from '../mcp'
+import { SearchableSelect } from './SearchableSelect'
 import {
   fetchOpenCodeProviders,
   fetchModelsForProvider,
@@ -20,7 +18,6 @@ import {
   populateModelDropdown,
   createLoadingProviderSelect,
   getCachedProviders,
-  type OpenCodeProvider,
   type OpenCodeModel,
 } from './OpenCodeProviderSelect'
 
@@ -192,7 +189,7 @@ function updateProviderDropdown(): void {
   if (providerSelect) {
     const providers = getCachedProviders()
     if (providers.length > 0) {
-      providerSelect.setOptions(providers.map(p => ({ id: p.id, label: p.name })))
+      providerSelect.setOptions(providers.map((p) => ({ id: p.id, label: p.name })))
       providerSelect.setDisabled(false)
     }
   }
@@ -227,15 +224,15 @@ function updateModelInfo(model: OpenCodeModel | null): void {
   const contextEl = document.getElementById('zone-info-limit-context')
   const outputLimitEl = document.getElementById('zone-info-limit-output')
 
-  inputEl && (inputEl.textContent = inputCost > 0 ? `$${inputCost}/1M` : 'Free')
-  outputEl && (outputEl.textContent = outputCost > 0 ? `$${outputCost}/1M` : 'Free')
-  contextEl && (contextEl.textContent = contextLimit > 0 ? formatNumber(contextLimit) : 'N/A')
-  outputLimitEl && (outputLimitEl.textContent = outputLimit > 0 ? formatNumber(outputLimit) : 'N/A')
+  if (inputEl) inputEl.textContent = inputCost > 0 ? `$${inputCost}/1M` : 'Free'
+  if (outputEl) outputEl.textContent = outputCost > 0 ? `$${outputCost}/1M` : 'Free'
+  if (contextEl) contextEl.textContent = contextLimit > 0 ? formatNumber(contextLimit) : 'N/A'
+  if (outputLimitEl) outputLimitEl.textContent = outputLimit > 0 ? formatNumber(outputLimit) : 'N/A'
 }
 
 async function handleModelLoad(providerId: string): Promise<void> {
   const models = await fetchModelsForProvider(providerId)
-  const provider = getCachedProviders().find(p => p.id === providerId)
+  const provider = getCachedProviders().find((p) => p.id === providerId)
   const selectedModelId = modelSelect?.getValue() ?? currentModelId
 
   populateModelDropdown(modelSelect!, models, selectedModelId)
@@ -280,7 +277,7 @@ function setupProviderModelDropdowns(session: ManagedSession): void {
     modelSelect = createModelSelect(modelContainer, (model) => {
       currentModelId = model?.id ?? null
       if (currentProviderId) {
-        const provider = getCachedProviders().find(p => p.id === currentProviderId)
+        const provider = getCachedProviders().find((p) => p.id === currentProviderId)
         const fullModel = model ? provider?.models[model.id] : null
         updateModelInfo(fullModel || null)
       }
@@ -342,12 +339,16 @@ function renderContent(data: ZoneInfoData): void {
         <span class="zone-info-label">Session Type</span>
         <span class="zone-info-value">${isOpenCode ? 'OpenCode' : 'Claude'}</span>
       </div>
-      ${s.tmuxSession ? `
+      ${
+        s.tmuxSession
+          ? `
       <div class="zone-info-row">
         <span class="zone-info-label">tmux Session</span>
         <span class="zone-info-value zone-info-mono">${escapeHtml(s.tmuxSession)}</span>
       </div>
-      ` : ''}
+      `
+          : ''
+      }
       <div class="zone-info-row">
         <span class="zone-info-label">Created</span>
         <span class="zone-info-value">${formatTimeAgo(s.createdAt)}</span>
@@ -356,12 +357,16 @@ function renderContent(data: ZoneInfoData): void {
         <span class="zone-info-label">Last Activity</span>
         <span class="zone-info-value">${formatTimeAgo(s.lastActivity)}</span>
       </div>
-      ${s.currentTool ? `
+      ${
+        s.currentTool
+          ? `
       <div class="zone-info-row">
         <span class="zone-info-label">Current Tool</span>
         <span class="zone-info-value zone-info-highlight">${escapeHtml(s.currentTool)}</span>
       </div>
-      ` : ''}
+      `
+          : ''
+      }
     </div>
 
     <!-- Stats -->
@@ -384,7 +389,9 @@ function renderContent(data: ZoneInfoData): void {
     </div>
 
     <!-- Tokens -->
-    ${s.tokens ? `
+    ${
+      s.tokens
+        ? `
     <div class="zone-info-section">
       <div class="zone-info-section-title">Token Usage</div>
       <div class="zone-info-tokens">
@@ -398,17 +405,25 @@ function renderContent(data: ZoneInfoData): void {
         </div>
       </div>
     </div>
-    ` : ''}
+    `
+        : ''
+    }
 
     <!-- Git Status -->
-    ${s.gitStatus?.isRepo ? renderGitStatus(s.gitStatus) : `
+    ${
+      s.gitStatus?.isRepo
+        ? renderGitStatus(s.gitStatus)
+        : `
     <div class="zone-info-section">
       <div class="zone-info-section-title">Git Status</div>
       <div class="zone-info-muted">Not a git repository</div>
     </div>
-    `}
+    `
+    }
 
-    ${isOpenCode ? `
+    ${
+      isOpenCode
+        ? `
     <!-- Provider & Model Configuration -->
     <div class="zone-info-section">
       <div class="zone-info-section-title">Provider & Model Configuration</div>
@@ -450,22 +465,40 @@ function renderContent(data: ZoneInfoData): void {
         <button type="button" class="modal-btn zone-info-btn zone-info-btn-primary" id="zone-info-save" disabled>Save Configuration</button>
       </div>
     </div>
-    ` : ''}
+    `
+        : ''
+    }
 
     <!-- Files Touched -->
-    ${filesTouched.length > 0 ? `
+    ${
+      filesTouched.length > 0
+        ? `
     <div class="zone-info-section">
       <div class="zone-info-section-title">Files Touched (${filesTouched.length})</div>
       <div class="zone-info-files">
-        ${filesTouched.slice(0, 10).map(f => `
+        ${filesTouched
+          .slice(0, 10)
+          .map(
+            (f) => `
           <div class="zone-info-file">${escapeHtml(shortenPath(f))}</div>
-        `).join('')}
-        ${filesTouched.length > 10 ? `
+        `
+          )
+          .join('')}
+        ${
+          filesTouched.length > 10
+            ? `
           <div class="zone-info-file zone-info-muted">... and ${filesTouched.length - 10} more</div>
-        ` : ''}
+        `
+            : ''
+        }
       </div>
     </div>
-    ` : ''}
+    `
+        : ''
+    }
+
+    <!-- MCP Servers -->
+    ${renderMCPServers()}
 
     <!-- IDs (for debugging) -->
     <div class="zone-info-section zone-info-ids">
@@ -474,17 +507,23 @@ function renderContent(data: ZoneInfoData): void {
         <span class="zone-info-label">Managed ID</span>
         <span class="zone-info-value zone-info-mono zone-info-small">${s.id}</span>
       </div>
-      ${isOpenCode ? `
+      ${
+        isOpenCode
+          ? `
       <div class="zone-info-row">
         <span class="zone-info-label">OpenCode Session</span>
         <span class="zone-info-value zone-info-mono zone-info-small">${s.opencodeSessionId}</span>
       </div>
-      ` : (s.claudeSessionId ? `
+      `
+          : s.claudeSessionId
+            ? `
       <div class="zone-info-row">
         <span class="zone-info-label">Claude Session</span>
         <span class="zone-info-value zone-info-mono zone-info-small">${s.claudeSessionId}</span>
       </div>
-      ` : '')}
+      `
+            : ''
+      }
     </div>
   `
 
@@ -513,7 +552,9 @@ function renderGitStatus(git: GitStatus): string {
       </div>
 
       <!-- Changes -->
-      ${stagedTotal > 0 ? `
+      ${
+        stagedTotal > 0
+          ? `
       <div class="zone-info-git-changes">
         <span class="zone-info-changes-label">Staged</span>
         <span class="zone-info-changes-detail">
@@ -522,9 +563,13 @@ function renderGitStatus(git: GitStatus): string {
           ${git.staged.deleted > 0 ? `<span class="zone-info-deleted">-${git.staged.deleted}</span>` : ''}
         </span>
       </div>
-      ` : ''}
+      `
+          : ''
+      }
 
-      ${unstagedTotal > 0 ? `
+      ${
+        unstagedTotal > 0
+          ? `
       <div class="zone-info-git-changes">
         <span class="zone-info-changes-label">Unstaged</span>
         <span class="zone-info-changes-detail">
@@ -533,37 +578,115 @@ function renderGitStatus(git: GitStatus): string {
           ${git.unstaged.deleted > 0 ? `<span class="zone-info-deleted">-${git.unstaged.deleted}</span>` : ''}
         </span>
       </div>
-      ` : ''}
+      `
+          : ''
+      }
 
-      ${git.untracked > 0 ? `
+      ${
+        git.untracked > 0
+          ? `
       <div class="zone-info-git-changes">
         <span class="zone-info-changes-label">Untracked</span>
         <span class="zone-info-changes-detail zone-info-muted">${git.untracked} files</span>
       </div>
-      ` : ''}
+      `
+          : ''
+      }
 
-      ${!isDirty ? `
+      ${
+        !isDirty
+          ? `
       <div class="zone-info-git-clean">Working tree clean</div>
-      ` : ''}
+      `
+          : ''
+      }
 
       <!-- Lines changed -->
-      ${(git.linesAdded > 0 || git.linesRemoved > 0) ? `
+      ${
+        git.linesAdded > 0 || git.linesRemoved > 0
+          ? `
       <div class="zone-info-git-lines">
         ${git.linesAdded > 0 ? `<span class="zone-info-added">+${git.linesAdded}</span>` : ''}
         ${git.linesRemoved > 0 ? `<span class="zone-info-deleted">-${git.linesRemoved}</span>` : ''}
         <span class="zone-info-muted">lines</span>
       </div>
-      ` : ''}
+      `
+          : ''
+      }
 
       <!-- Last commit -->
-      ${git.lastCommitMessage ? `
+      ${
+        git.lastCommitMessage
+          ? `
       <div class="zone-info-git-commit">
         <span class="zone-info-commit-msg">${escapeHtml(git.lastCommitMessage)}</span>
-        ${git.lastCommitTime ? `
+        ${
+          git.lastCommitTime
+            ? `
         <span class="zone-info-commit-time">${formatTimeAgo(git.lastCommitTime * 1000)}</span>
-        ` : ''}
+        `
+            : ''
+        }
       </div>
-      ` : ''}
+      `
+          : ''
+      }
+    </div>
+  `
+}
+
+// ============================================================================
+// MCP Servers Section
+// ============================================================================
+
+function renderMCPServers(): string {
+  const servers = mcpRegistry.getServers()
+  const stats = mcpRegistry.getStats()
+
+  if (servers.length === 0) {
+    return ''
+  }
+
+  // Get category icons
+  const categoryIcons: Record<string, string> = {
+    browser: '🌐',
+    database: '🗄️',
+    filesystem: '📁',
+    search: '🔍',
+    memory: '🧠',
+    api: '⚡',
+    git: '📦',
+    ai: '🤖',
+    other: '🔧',
+  }
+
+  return `
+    <div class="zone-info-section">
+      <div class="zone-info-section-title">Connected MCP Servers (${servers.length})</div>
+      <div class="zone-info-mcp-servers">
+        ${servers
+          .slice(0, 8)
+          .map(
+            (server) => `
+          <div class="zone-info-mcp-server">
+            <span class="zone-info-mcp-icon">${categoryIcons[server.category] || '🔧'}</span>
+            <span class="zone-info-mcp-name">${escapeHtml(server.name)}</span>
+            <span class="zone-info-mcp-tools">${server.tools.length} tools</span>
+          </div>
+        `
+          )
+          .join('')}
+        ${
+          servers.length > 8
+            ? `
+          <div class="zone-info-mcp-server zone-info-muted">... and ${servers.length - 8} more</div>
+        `
+            : ''
+        }
+      </div>
+      <div class="zone-info-mcp-stats">
+        <span>Total: ${stats.toolCount} tools across ${stats.serverCount} servers</span>
+      </div>
     </div>
   `
 }

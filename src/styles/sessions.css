@@ -28,8 +28,13 @@
 }
 
 @keyframes attention-badge-pulse {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.1); }
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.1);
+  }
 }
 
 #new-session-btn {
@@ -242,7 +247,8 @@
 }
 
 @keyframes attention-pulse {
-  0%, 100% {
+  0%,
+  100% {
     background: rgba(251, 191, 36, 0.12);
     box-shadow: 0 0 0 0 rgba(251, 191, 36, 0);
   }
@@ -322,4 +328,80 @@
   font-family: var(--font-mono, monospace);
   margin-top: 1px;
   opacity: 0.8;
+}
+
+/* Pinned sessions */
+.session-item.pinned {
+  background: rgba(250, 204, 21, 0.08);
+  border-color: rgba(250, 204, 21, 0.2);
+}
+
+.session-item.pinned .session-name {
+  color: #fde047;
+}
+
+.session-pin-indicator {
+  margin-right: 4px;
+  font-size: 10px;
+}
+
+/* Archived sessions (when shown) */
+.session-item.archived {
+  opacity: 0.5;
+  background: rgba(100, 100, 100, 0.1);
+}
+
+.session-item.archived .session-name {
+  color: rgba(255, 255, 255, 0.5);
+  text-decoration: line-through;
+}
+
+.session-item.archived:hover {
+  opacity: 0.8;
+}
+
+/* Drag and drop states */
+.session-item.dragging {
+  opacity: 0.5;
+  border: 1px dashed rgba(167, 139, 250, 0.5);
+}
+
+.session-item.drag-over {
+  border-top: 2px solid #a78bfa;
+  background: rgba(167, 139, 250, 0.1);
+}
+
+/* Archive toggle button in sidebar */
+.session-archive-toggle {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 4px 0;
+  margin-bottom: 4px;
+}
+
+.archive-toggle-btn {
+  font-size: 11px;
+  padding: 4px 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.archive-toggle-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+/* Pin and archive action buttons */
+.session-item .session-actions .pin-btn:hover {
+  background: rgba(250, 204, 21, 0.3);
+  color: #fde047;
+}
+
+.session-item .session-actions .archive-btn:hover {
+  background: rgba(139, 92, 246, 0.3);
+  color: #a78bfa;
 }

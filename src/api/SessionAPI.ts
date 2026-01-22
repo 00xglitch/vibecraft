@@ -108,6 +108,26 @@ export function createSessionAPI(apiUrl: string) {
     },
 
     /**
+     * Update session properties (pin, archive, sortOrder)
+     */
+    async updateSession(
+      sessionId: string,
+      updates: { pinned?: boolean; archived?: boolean; sortOrder?: number }
+    ): Promise<SimpleResponse> {
+      try {
+        const response = await fetch(`${apiUrl}/sessions/${sessionId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updates),
+        })
+        return await response.json()
+      } catch (e) {
+        console.error('Error updating session:', e)
+        return { ok: false, error: 'Network error' }
+      }
+    },
+
+    /**
      * Delete a managed session
      */
     async deleteSession(sessionId: string): Promise<SimpleResponse> {
@@ -140,10 +160,7 @@ export function createSessionAPI(apiUrl: string) {
     /**
      * Send a prompt to a managed session
      */
-    async sendPrompt(
-      sessionId: string,
-      prompt: string
-    ): Promise<SimpleResponse> {
+    async sendPrompt(sessionId: string, prompt: string): Promise<SimpleResponse> {
       try {
         const response = await fetch(`${apiUrl}/sessions/${sessionId}/prompt`, {
           method: 'POST',
@@ -160,10 +177,7 @@ export function createSessionAPI(apiUrl: string) {
     /**
      * Link a Claude session ID to a managed session
      */
-    async linkSession(
-      managedId: string,
-      claudeSessionId: string
-    ): Promise<void> {
+    async linkSession(managedId: string, claudeSessionId: string): Promise<void> {
       try {
         await fetch(`${apiUrl}/sessions/${managedId}/link`, {
           method: 'POST',
