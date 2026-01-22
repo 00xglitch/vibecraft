@@ -11,12 +11,33 @@
 
 import { test, expect } from '@playwright/test'
 
+// Helper to dismiss not-connected overlay if present
+async function dismissOverlayIfPresent(page: import('@playwright/test').Page) {
+  try {
+    const overlay = page.locator('#not-connected-overlay')
+    // Only try to dismiss if overlay is visible
+    if (await overlay.isVisible({ timeout: 500 }).catch(() => false)) {
+      const exploreBtn = page.locator('#explore-offline')
+      // Use force click to bypass visibility check if needed
+      await exploreBtn.click({ timeout: 1000, force: true }).catch(() => {
+        // Ignore click errors - overlay may have hidden on its own
+      })
+      // Brief wait for any animation
+      await page.waitForTimeout(200)
+    }
+  } catch {
+    // Ignore all errors - overlay handling is optional
+  }
+}
+
 test.describe('Vibecraft Application', () => {
   test.beforeEach(async ({ page }) => {
     // Navigate to the app
     await page.goto('/')
     // Wait for Three.js scene to initialize
     await page.waitForSelector('canvas', { timeout: 10000 })
+    // Dismiss the not-connected overlay if present
+    await dismissOverlayIfPresent(page)
   })
 
   test('should load the 3D scene', async ({ page }) => {
@@ -24,34 +45,34 @@ test.describe('Vibecraft Application', () => {
     const canvas = page.locator('canvas')
     await expect(canvas).toBeVisible()
 
-    // Scene HUD should be present
-    const hud = page.locator('.scene-hud')
+    // Scene HUD should be present (using ID selector)
+    const hud = page.locator('#scene-hud')
     await expect(hud).toBeVisible()
   })
 
   test('should display session panel', async ({ page }) => {
-    // Session panel should be visible
-    const sessionPanel = page.locator('.session-panel')
+    // Session panel should be visible (using ID selector)
+    const sessionPanel = page.locator('#sessions-panel')
     await expect(sessionPanel).toBeVisible()
 
-    // Session list should exist
-    const sessionList = page.locator('.session-list')
+    // Session list should exist (using ID selector)
+    const sessionList = page.locator('#sessions-list')
     await expect(sessionList).toBeVisible()
   })
 
   test('should display activity feed', async ({ page }) => {
-    // Activity feed should be present
-    const feed = page.locator('.feed-panel')
+    // Activity feed should be present (using ID selector)
+    const feed = page.locator('#feed-panel')
     await expect(feed).toBeVisible()
   })
 
   test('should display prompt input', async ({ page }) => {
-    // Prompt form should be visible
-    const promptForm = page.locator('.prompt-form')
+    // Prompt form should be visible (using ID selector)
+    const promptForm = page.locator('#prompt-form')
     await expect(promptForm).toBeVisible()
 
-    // Input field should be accessible
-    const promptInput = page.locator('.prompt-input')
+    // Input field should be accessible (using ID selector)
+    const promptInput = page.locator('#prompt-input')
     await expect(promptInput).toBeVisible()
   })
 })
@@ -60,15 +81,16 @@ test.describe('Session Management', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
     await page.waitForSelector('canvas')
+    await dismissOverlayIfPresent(page)
   })
 
   test('should open new session modal with Alt+N', async ({ page }) => {
     // Press Alt+N to open new session modal
     await page.keyboard.press('Alt+KeyN')
 
-    // Wait for modal to appear
+    // Wait for modal to appear - check for visible class
     const modal = page.locator('#new-session-modal')
-    await expect(modal).toBeVisible({ timeout: 5000 })
+    await expect(modal).toHaveClass(/visible/, { timeout: 5000 })
 
     // Check modal has expected elements
     await expect(page.locator('#session-name-input')).toBeVisible()
@@ -78,20 +100,21 @@ test.describe('Session Management', () => {
   test('should close modal on escape', async ({ page }) => {
     // Open modal
     await page.keyboard.press('Alt+KeyN')
-    await page.waitForSelector('#new-session-modal.visible', { timeout: 5000 })
+    const modal = page.locator('#new-session-modal')
+    await expect(modal).toHaveClass(/visible/, { timeout: 5000 })
 
     // Press Escape to close
     await page.keyboard.press('Escape')
 
-    // Modal should be hidden
-    const modal = page.locator('#new-session-modal')
+    // Modal should not have visible class
     await expect(modal).not.toHaveClass(/visible/)
   })
 
   test('should switch between session types', async ({ page }) => {
     // Open modal
     await page.keyboard.press('Alt+KeyN')
-    await page.waitForSelector('#new-session-modal.visible', { timeout: 5000 })
+    const modal = page.locator('#new-session-modal')
+    await expect(modal).toHaveClass(/visible/, { timeout: 5000 })
 
     // Claude tab should be active by default
     const claudeTab = page.locator('.session-type-tab[data-type="claude"]')
@@ -111,6 +134,7 @@ test.describe('Keyboard Navigation', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
     await page.waitForSelector('canvas')
+    await dismissOverlayIfPresent(page)
   })
 
   test('should switch focus with Tab key', async ({ page }) => {
@@ -132,10 +156,9 @@ test.describe('Keyboard Navigation', () => {
     // Press 0 for overview
     await page.keyboard.press('Digit0')
 
-    // Check that we're in overview mode (no active session)
-    // The session list should show "All Sessions" or similar
-    const allSessionsBadge = page.locator('.all-sessions-badge, .session-filter-all')
-    await expect(allSessionsBadge).toBeVisible()
+    // Check that "All Sessions" item is active
+    const allSessionsItem = page.locator('.session-item.all-sessions.active')
+    await expect(allSessionsItem).toBeVisible()
   })
 })
 
@@ -143,6 +166,7 @@ test.describe('Zone Interactions', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
     await page.waitForSelector('canvas')
+    await dismissOverlayIfPresent(page)
   })
 
   test('should show click menu on right-click', async ({ page }) => {
@@ -166,21 +190,24 @@ test.describe('Draw Mode', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
     await page.waitForSelector('canvas')
+    await dismissOverlayIfPresent(page)
   })
 
   test('should toggle draw mode with D key', async ({ page }) => {
     // Press D to enter draw mode
     await page.keyboard.press('KeyD')
+    await page.waitForTimeout(300)
 
-    // Draw mode UI should appear
-    const drawModeUI = page.locator('.draw-mode-controls, [data-draw-mode="true"]')
-    await expect(drawModeUI).toBeVisible({ timeout: 3000 })
+    // Draw mode indicator should have visible class
+    const drawIndicator = page.locator('#draw-indicator')
+    await expect(drawIndicator).toHaveClass(/visible/, { timeout: 3000 })
 
     // Press D again to exit
     await page.keyboard.press('KeyD')
+    await page.waitForTimeout(300)
 
-    // Draw mode UI should hide
-    await expect(drawModeUI).not.toBeVisible()
+    // Draw mode indicator should not have visible class
+    await expect(drawIndicator).not.toHaveClass(/visible/)
   })
 })
 
@@ -188,12 +215,13 @@ test.describe('Sound Controls', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
     await page.waitForSelector('canvas')
+    await dismissOverlayIfPresent(page)
   })
 
-  test('should have volume slider', async ({ page }) => {
-    // Volume slider should exist in HUD
-    const volumeSlider = page.locator('.volume-slider, input[type="range"]')
-    await expect(volumeSlider.first()).toBeVisible()
+  test('should have settings button in HUD', async ({ page }) => {
+    // Settings button should exist in HUD (volume is in settings modal)
+    const settingsBtn = page.locator('#settings-btn')
+    await expect(settingsBtn).toBeVisible()
   })
 })
 
@@ -201,15 +229,16 @@ test.describe('Settings Modal', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
     await page.waitForSelector('canvas')
+    await dismissOverlayIfPresent(page)
   })
 
   test('should open dev panel with Alt+D', async ({ page }) => {
     // Press Alt+D to open dev panel
     await page.keyboard.press('Alt+KeyD')
 
-    // Dev panel should appear
-    const devPanel = page.locator('.dev-panel, #dev-panel')
-    await expect(devPanel).toBeVisible({ timeout: 3000 })
+    // Dev panel should appear (remove hidden class)
+    const devPanel = page.locator('#dev-panel')
+    await expect(devPanel).not.toHaveClass(/hidden/, { timeout: 3000 })
   })
 })
 

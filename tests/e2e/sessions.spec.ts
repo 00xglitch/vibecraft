@@ -7,11 +7,31 @@
 
 import { test, expect } from '@playwright/test'
 
+// Helper to dismiss not-connected overlay if present
+async function dismissOverlayIfPresent(page: import('@playwright/test').Page) {
+  try {
+    const overlay = page.locator('#not-connected-overlay')
+    // Only try to dismiss if overlay is visible
+    if (await overlay.isVisible({ timeout: 500 }).catch(() => false)) {
+      const exploreBtn = page.locator('#explore-offline')
+      // Use force click to bypass visibility check if needed
+      await exploreBtn.click({ timeout: 1000, force: true }).catch(() => {
+        // Ignore click errors - overlay may have hidden on its own
+      })
+      // Brief wait for any animation
+      await page.waitForTimeout(200)
+    }
+  } catch {
+    // Ignore all errors - overlay handling is optional
+  }
+}
+
 test.describe('Session Management', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
-    // Wait for the app to initialize - look for the Vibecraft title
-    await page.waitForSelector('text=Vibecraft', { timeout: 10000 })
+    // Wait for canvas (scene initialized)
+    await page.waitForSelector('canvas', { timeout: 10000 })
+    await dismissOverlayIfPresent(page)
   })
 
   test('shows connection status indicator', async ({ page }) => {
@@ -72,8 +92,8 @@ test.describe('Session Management', () => {
 
   test('session keyboard shortcuts work', async ({ page }) => {
     // Test number key shortcuts for session switching
-    await page.keyboard.press('1')
-    await page.keyboard.press('2')
+    await page.keyboard.press('Digit1')
+    await page.keyboard.press('Digit2')
 
     // Should not cause any errors - page should still be functional
     const body = page.locator('body')
@@ -81,8 +101,8 @@ test.describe('Session Management', () => {
   })
 
   test('displays token counter', async ({ page }) => {
-    // Token counter should be visible
-    const tokenCounter = page.locator('text=/tok/i').or(page.locator('text=/⚡/'))
+    // Token counter should be visible (using specific ID)
+    const tokenCounter = page.locator('#token-counter')
     await expect(tokenCounter).toBeVisible({ timeout: 5000 })
   })
 
@@ -96,14 +116,15 @@ test.describe('Session Management', () => {
 test.describe('Session List', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
-    await page.waitForSelector('#status-dot', { timeout: 10000 })
+    await page.waitForSelector('canvas', { timeout: 10000 })
+    await dismissOverlayIfPresent(page)
   })
 
   test('displays empty state or sessions', async ({ page }) => {
     // Either shows sessions or an empty state
     const content = await page.content()
 
-    // Page should have loaded properly
-    expect(content).toContain('vibecraft')
+    // Page should have loaded properly (case insensitive check)
+    expect(content.toLowerCase()).toContain('vibecraft')
   })
 })

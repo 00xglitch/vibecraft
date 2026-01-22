@@ -6,13 +6,34 @@
 
 import { test, expect } from '@playwright/test'
 
+// Helper to dismiss not-connected overlay if present
+async function dismissOverlayIfPresent(page: import('@playwright/test').Page) {
+  try {
+    const overlay = page.locator('#not-connected-overlay')
+    // Only try to dismiss if overlay is visible
+    if (await overlay.isVisible({ timeout: 500 }).catch(() => false)) {
+      const exploreBtn = page.locator('#explore-offline')
+      // Use force click to bypass visibility check if needed
+      await exploreBtn.click({ timeout: 1000, force: true }).catch(() => {
+        // Ignore click errors - overlay may have hidden on its own
+      })
+      // Brief wait for any animation
+      await page.waitForTimeout(200)
+    }
+  } catch {
+    // Ignore all errors - overlay handling is optional
+  }
+}
+
 test.describe('Zone Visibility', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
-    // Wait for WebSocket connection
-    await page.waitForSelector('text=Vibecraft', { timeout: 10000 })
+    // Wait for canvas (Three.js scene)
+    await page.waitForSelector('canvas', { timeout: 10000 })
+    // Dismiss overlay if present
+    await dismissOverlayIfPresent(page)
     // Give time for zones to load from history
-    await page.waitForTimeout(2000)
+    await page.waitForTimeout(1000)
   })
 
   test('3D scene renders', async ({ page }) => {
@@ -22,23 +43,23 @@ test.describe('Zone Visibility', () => {
   })
 
   test('zones are created for sessions', async ({ page }) => {
-    // If we have sessions, we should see zone labels
-    // Zone labels appear as text in the 3D scene or in UI
-    const sessionCount = await page.locator('.session-item').count()
+    // Session items should be visible (at least "All Sessions")
+    const sessionItems = page.locator('.session-item')
+    const count = await sessionItems.count()
 
-    // With sessions present, we should have zones
-    expect(sessionCount).toBeGreaterThan(0)
+    // We should have at least the "All Sessions" item
+    expect(count).toBeGreaterThan(0)
   })
 
   test('zones persist after page interaction', async ({ page }) => {
     // Get initial state
     const initialSessions = await page.locator('.session-item').count()
 
-    // Click around the page
-    await page.keyboard.press('1')
-    await page.waitForTimeout(500)
-    await page.keyboard.press('2')
-    await page.waitForTimeout(500)
+    // Click around the page (switch sessions)
+    await page.keyboard.press('Digit1')
+    await page.waitForTimeout(300)
+    await page.keyboard.press('Digit2')
+    await page.waitForTimeout(300)
 
     // Sessions should still be visible
     const afterSessions = await page.locator('.session-item').count()
@@ -50,8 +71,8 @@ test.describe('Zone Visibility', () => {
     const firstSession = page.locator('.session-item').first()
     if (await firstSession.isVisible()) {
       await firstSession.click()
-      await page.waitForTimeout(500)
-      // Session should have selected state
+      await page.waitForTimeout(300)
+      // Session should have selected state or active class
       await expect(firstSession).toBeVisible()
     }
   })
@@ -60,14 +81,16 @@ test.describe('Zone Visibility', () => {
 test.describe('Session Status Display', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
-    await page.waitForSelector('text=Vibecraft', { timeout: 10000 })
+    await page.waitForSelector('canvas', { timeout: 10000 })
+    await dismissOverlayIfPresent(page)
   })
 
   test('shows working status for active sessions', async ({ page }) => {
     // Look for "working" or status indicators
-    const workingIndicator = page.locator('text=/working|Using/i')
-    // May or may not have working sessions
-    await page.waitForTimeout(1000)
+    // May or may not have working sessions - just verify no errors
+    await page.waitForTimeout(500)
+    const body = page.locator('body')
+    await expect(body).toBeVisible()
   })
 
   test('shows idle status for inactive sessions', async ({ page }) => {
@@ -89,15 +112,16 @@ test.describe('Session Status Display', () => {
 test.describe('Zone Interactions', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
-    await page.waitForSelector('text=Vibecraft', { timeout: 10000 })
-    await page.waitForTimeout(1000)
+    await page.waitForSelector('canvas', { timeout: 10000 })
+    await dismissOverlayIfPresent(page)
+    await page.waitForTimeout(500)
   })
 
   test('number keys switch sessions', async ({ page }) => {
     // Press 1-6 to switch between sessions
     for (let i = 1; i <= 6; i++) {
-      await page.keyboard.press(String(i))
-      await page.waitForTimeout(200)
+      await page.keyboard.press(`Digit${i}`)
+      await page.waitForTimeout(100)
     }
 
     // Page should still be functional
@@ -107,7 +131,7 @@ test.describe('Zone Interactions', () => {
 
   test('Tab key toggles focus mode', async ({ page }) => {
     await page.keyboard.press('Tab')
-    await page.waitForTimeout(300)
+    await page.waitForTimeout(200)
     await page.keyboard.press('Tab')
 
     // Should toggle without errors
@@ -116,20 +140,28 @@ test.describe('Zone Interactions', () => {
   })
 
   test('D key toggles draw mode', async ({ page }) => {
-    // Toggle draw mode
-    await page.keyboard.press('d')
+    // Toggle draw mode on
+    await page.keyboard.press('KeyD')
     await page.waitForTimeout(300)
 
-    // Draw mode indicator might appear
+    // Draw mode indicator should have visible class
+    const drawIndicator = page.locator('#draw-indicator')
+    await expect(drawIndicator).toHaveClass(/visible/, { timeout: 3000 })
+
     // Toggle off
-    await page.keyboard.press('d')
+    await page.keyboard.press('KeyD')
+    await page.waitForTimeout(300)
+
+    // Draw mode indicator should not have visible class
+    await expect(drawIndicator).not.toHaveClass(/visible/)
   })
 })
 
 test.describe('Activity Feed', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
-    await page.waitForSelector('text=Vibecraft', { timeout: 10000 })
+    await page.waitForSelector('canvas', { timeout: 10000 })
+    await dismissOverlayIfPresent(page)
   })
 
   test('shows activity feed area', async ({ page }) => {
