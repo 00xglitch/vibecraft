@@ -148,7 +148,37 @@ export class Ninja implements ICharacter {
     band2.rotation.x = Math.PI / 2
     group.add(band2)
 
-    // Glowing eyes (the only visible part)
+    // Nose (subtle, under mask)
+    const skinColor = this.options.color === 0x1a1a2e ? 0xdeb887 : this.options.color
+    const noseGeo = new THREE.ConeGeometry(0.03, 0.06, 6)
+    const noseMat = new THREE.MeshStandardMaterial({
+      color: skinColor,
+      roughness: 0.9,
+    })
+    const nose = new THREE.Mesh(noseGeo, noseMat)
+    nose.rotation.x = Math.PI / 2
+    nose.position.set(0, 1.1, 0.22)
+    group.add(nose)
+
+    // Cheekbones (subtle facial definition)
+    const cheekGeo = new THREE.SphereGeometry(0.08, 8, 8)
+    const cheekMat = new THREE.MeshStandardMaterial({
+      color: skinColor,
+      transparent: true,
+      opacity: 0.7,
+      roughness: 0.9,
+    })
+    const leftCheek = new THREE.Mesh(cheekGeo, cheekMat)
+    leftCheek.scale.set(0.6, 0.8, 0.5)
+    leftCheek.position.set(-0.12, 1.08, 0.15)
+    group.add(leftCheek)
+
+    const rightCheek = new THREE.Mesh(cheekGeo, cheekMat.clone())
+    rightCheek.scale.set(0.6, 0.8, 0.5)
+    rightCheek.position.set(0.12, 1.08, 0.15)
+    group.add(rightCheek)
+
+    // Glowing eyes (the only visible part) - proper spherical shape
     const eyeGeo = new THREE.SphereGeometry(0.04, 12, 12)
     const eyeMat = new THREE.MeshBasicMaterial({
       color: 0xff4444, // Red glowing eyes
@@ -156,13 +186,13 @@ export class Ninja implements ICharacter {
 
     const leftEye = new THREE.Mesh(eyeGeo, eyeMat)
     leftEye.position.set(-0.08, 1.17, 0.2)
-    leftEye.scale.set(1.2, 0.5, 0.8) // Narrow slits
+    // No scale distortion - proper sphere for realistic look
     leftEye.name = 'leftEye'
     group.add(leftEye)
 
     const rightEye = new THREE.Mesh(eyeGeo, eyeMat)
     rightEye.position.set(0.08, 1.17, 0.2)
-    rightEye.scale.set(1.2, 0.5, 0.8)
+    // No scale distortion - proper sphere for realistic look
     rightEye.name = 'rightEye'
     group.add(rightEye)
 
@@ -260,6 +290,44 @@ export class Ninja implements ICharacter {
     const rightBoot = new THREE.Mesh(bootGeo, bootMat)
     rightBoot.position.set(0.08, -0.02, 0.02)
     group.add(rightBoot)
+
+    // Utility pouch on belt
+    const pouchGeo = new THREE.BoxGeometry(0.08, 0.06, 0.05)
+    const pouchMat = new THREE.MeshStandardMaterial({
+      color: 0x2a2a2a,
+      roughness: 0.8,
+    })
+    const pouch = new THREE.Mesh(pouchGeo, pouchMat)
+    pouch.position.set(-0.15, 0.42, 0.12)
+    pouch.rotation.y = -0.3
+    group.add(pouch)
+
+    // Shuriken holder on back
+    const holderGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.15, 8)
+    const holderMat = new THREE.MeshStandardMaterial({
+      color: 0x1a1a1a,
+      roughness: 0.6,
+    })
+    const holder = new THREE.Mesh(holderGeo, holderMat)
+    holder.rotation.z = Math.PI / 2
+    holder.position.set(0, 0.65, -0.18)
+    group.add(holder)
+
+    // Knee guards (protective armor)
+    const kneeGuardGeo = new THREE.CylinderGeometry(0.08, 0.08, 0.06, 8)
+    const kneeGuardMat = new THREE.MeshStandardMaterial({
+      color: 0x1a1a1a,
+      metalness: 0.3,
+      roughness: 0.5,
+    })
+
+    const leftKnee = new THREE.Mesh(kneeGuardGeo, kneeGuardMat)
+    leftKnee.position.set(-0.08, 0.25, 0)
+    group.add(leftKnee)
+
+    const rightKnee = new THREE.Mesh(kneeGuardGeo, kneeGuardMat.clone())
+    rightKnee.position.set(0.08, 0.25, 0)
+    group.add(rightKnee)
 
     return group
   }

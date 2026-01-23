@@ -176,7 +176,7 @@ export class AfroSamurai implements ICharacter {
     const faceGeo = new THREE.SphereGeometry(0.26, 16, 12)
     const face = new THREE.Mesh(faceGeo, skinMat)
     face.position.y = 0.1
-    face.position.z = 0.15 // Push face forward out of afro
+    face.position.z = 0.18 // Push face forward to prevent Z-fighting with afro
     face.scale.set(1, 1.1, 0.9) // Slightly elongated, flatter in z
     group.add(face)
 
@@ -189,7 +189,7 @@ export class AfroSamurai implements ICharacter {
     })
     const afro = new THREE.Mesh(afroGeo, afroMat)
     afro.position.y = 0.28
-    afro.position.z = -0.15 // Push afro further back
+    afro.position.z = -0.18 // Push afro back to increase separation from face
     group.add(afro)
 
     // Afro texture bumps (small spheres for volume) - adjusted to new afro position
@@ -201,7 +201,7 @@ export class AfroSamurai implements ICharacter {
       bump.position.set(
         Math.cos(angle) * radius * (0.8 + Math.random() * 0.4),
         0.28 + Math.random() * 0.15,
-        Math.sin(angle) * radius * 0.5 - 0.15 // Match new afro z position
+        Math.sin(angle) * radius * 0.5 - 0.18 // Match new afro z position (-0.18)
       )
       group.add(bump)
     }
@@ -236,36 +236,34 @@ export class AfroSamurai implements ICharacter {
     tail2.rotation.set(0.4, 0.3, 0.5)
     group.add(tail2)
 
-    // Eyes - expressive with shine (positioned on face surface)
+    // Eyes - simplified 3-layer design (outer, iris+pupil, highlight)
     const eyeWhiteGeo = new THREE.SphereGeometry(0.045, 12, 10)
     const eyeWhiteMat = new THREE.MeshStandardMaterial({ color: 0xfaf8f5 })
 
-    const irisGeo = new THREE.SphereGeometry(0.028, 10, 10)
-    const irisMat = new THREE.MeshStandardMaterial({ color: 0x3d2817 }) // Dark brown iris
-
-    const pupilGeo = new THREE.SphereGeometry(0.015, 8, 8)
-    const pupilMat = new THREE.MeshStandardMaterial({ color: 0x0a0a0a })
+    // Combined iris+pupil geometry (single mesh for performance)
+    const irisGeo = new THREE.SphereGeometry(0.032, 10, 10)
+    const irisMat = new THREE.MeshStandardMaterial({
+      color: 0x4a2511, // Brown iris
+      emissive: 0x1a0a05, // Subtle emissive for depth
+      emissiveIntensity: 0.3,
+    })
 
     // Eye shine/highlight
-    const shineGeo = new THREE.SphereGeometry(0.008, 6, 6)
+    const shineGeo = new THREE.SphereGeometry(0.008, 8, 8)
     const shineMat = new THREE.MeshStandardMaterial({
       color: 0xffffff,
       emissive: 0xffffff,
       emissiveIntensity: 0.5,
     })
 
-    // Left eye assembly
+    // Left eye assembly (3 layers)
     const leftEyeWhite = new THREE.Mesh(eyeWhiteGeo, eyeWhiteMat)
     leftEyeWhite.position.set(-0.085, 0.13, 0.32)
     leftEyeWhite.scale.set(1, 0.8, 0.6)
     group.add(leftEyeWhite)
 
-    const leftIris = new THREE.Mesh(irisGeo, irisMat)
-    leftIris.position.set(-0.085, 0.125, 0.36)
-    group.add(leftIris)
-
-    const leftEye = new THREE.Mesh(pupilGeo, pupilMat)
-    leftEye.position.set(-0.085, 0.12, 0.38)
+    const leftEye = new THREE.Mesh(irisGeo, irisMat)
+    leftEye.position.set(-0.085, 0.125, 0.365)
     leftEye.name = 'leftEye'
     group.add(leftEye)
 
@@ -273,22 +271,18 @@ export class AfroSamurai implements ICharacter {
     leftShine.position.set(-0.075, 0.14, 0.385)
     group.add(leftShine)
 
-    // Right eye assembly
+    // Right eye assembly (3 layers)
     const rightEyeWhite = new THREE.Mesh(eyeWhiteGeo, eyeWhiteMat)
     rightEyeWhite.position.set(0.085, 0.13, 0.32)
     rightEyeWhite.scale.set(1, 0.8, 0.6)
     group.add(rightEyeWhite)
 
-    const rightIris = new THREE.Mesh(irisGeo, irisMat)
-    rightIris.position.set(0.085, 0.125, 0.36)
-    group.add(rightIris)
-
-    const rightEye = new THREE.Mesh(pupilGeo, pupilMat)
-    rightEye.position.set(0.085, 0.12, 0.38)
+    const rightEye = new THREE.Mesh(irisGeo, irisMat.clone())
+    rightEye.position.set(0.085, 0.125, 0.365)
     rightEye.name = 'rightEye'
     group.add(rightEye)
 
-    const rightShine = new THREE.Mesh(shineGeo, shineMat)
+    const rightShine = new THREE.Mesh(shineGeo, shineMat.clone())
     rightShine.position.set(0.095, 0.14, 0.385)
     group.add(rightShine)
 
@@ -341,21 +335,27 @@ export class AfroSamurai implements ICharacter {
     rightNostril.position.set(0.018, 0.03, 0.4)
     group.add(rightNostril)
 
-    // Mouth with smile - upper lip
-    const upperLipGeo = new THREE.TorusGeometry(0.035, 0.012, 8, 12, Math.PI)
-    const lipMat = new THREE.MeshStandardMaterial({ color: 0x6b3a2a }) // Darker lip color
-    const upperLip = new THREE.Mesh(upperLipGeo, lipMat)
-    upperLip.position.set(0, -0.01, 0.365)
-    upperLip.rotation.x = Math.PI / 2
-    upperLip.rotation.z = Math.PI
-    group.add(upperLip)
+    // Mouth with natural smile curve (using shape for better control)
+    const mouthShape = new THREE.Shape()
+    mouthShape.moveTo(-0.08, 0)
+    mouthShape.quadraticCurveTo(0, -0.04, 0.08, 0) // Gentle smile curve
+    const mouthGeo = new THREE.ShapeGeometry(mouthShape)
+    const mouthMat = new THREE.MeshStandardMaterial({
+      color: 0x6b3a2a, // Darker lip color
+      side: THREE.DoubleSide,
+    })
+    const mouth = new THREE.Mesh(mouthGeo, mouthMat)
+    mouth.position.set(0, -0.015, 0.365)
+    group.add(mouth)
 
-    // Lower lip
-    const lowerLipGeo = new THREE.TorusGeometry(0.032, 0.015, 8, 12, Math.PI)
-    const lowerLip = new THREE.Mesh(lowerLipGeo, lipMat)
-    lowerLip.position.set(0, -0.025, 0.365)
-    lowerLip.rotation.x = Math.PI / 2
-    group.add(lowerLip)
+    // Lip thickness (subtle 3D effect)
+    const lipThicknessGeo = new THREE.BoxGeometry(0.15, 0.012, 0.008)
+    const lipThicknessMat = new THREE.MeshStandardMaterial({
+      color: 0x8b4a3a, // Slightly lighter for top lip
+    })
+    const lipThickness = new THREE.Mesh(lipThicknessGeo, lipThicknessMat)
+    lipThickness.position.set(0, -0.01, 0.36)
+    group.add(lipThickness)
 
     // Teeth (visible in smile)
     const teethGeo = new THREE.BoxGeometry(0.05, 0.015, 0.01)
