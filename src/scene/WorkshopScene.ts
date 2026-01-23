@@ -90,6 +90,8 @@ export interface Zone {
   mcpStations: Map<string, MCPStation> // Key: serverName
   /** Current theme ID (if customized) */
   themeId?: ZoneThemeId
+  /** Activity pulse for high-activity zones */
+  activityPulse?: boolean
 }
 
 export type CameraMode = 'focused' | 'overview' | 'follow-active'
@@ -954,6 +956,129 @@ export class WorkshopScene {
     this.zoneColorIndex = 0
 
     console.log('Cleared all zones')
+  }
+
+  /**
+   * Compact zones toward the center, filling gaps in the spiral
+   * Animates zones to their new positions
+   * @returns Promise that resolves when all animations complete
+   */
+  async compactZones(): Promise<void> {
+    if (!this.hexGrid.canCompact()) {
+      console.log('No compaction needed - zones are already compact')
+      return
+    }
+
+    const moves = this.hexGrid.calculateCompactPositions()
+    if (moves.size === 0) {
+      console.log('No moves needed')
+      return
+    }
+
+    console.log(`Compacting ${moves.size} zones...`)
+
+    // Apply to hex grid first
+    this.hexGrid.applyPositionChanges(moves)
+
+    // Animate each zone to its new position
+    const animations: Promise<void>[] = []
+
+    for (const [sessionId, newHex] of moves) {
+      const zone = this.zones.get(sessionId)
+      if (!zone) continue
+
+      const newCartesian = this.hexGrid.axialToCartesian(newHex)
+      const newPosition = new THREE.Vector3(newCartesian.x, 0, newCartesian.z)
+
+      animations.push(this.animateZoneToPosition(zone, newPosition))
+    }
+
+    await Promise.all(animations)
+    console.log('Compaction complete')
+  }
+
+  /**
+   * Animate a zone smoothly to a new position
+   */
+  private animateZoneToPosition(zone: Zone, targetPos: THREE.Vector3): Promise<void> {
+    return new Promise((resolve) => {
+      const startPos = zone.position.clone()
+      const startTime = performance.now()
+      const duration = 500 // 500ms animation
+
+      const animate = () => {
+        const elapsed = performance.now() - startTime
+        const progress = Math.min(elapsed / duration, 1)
+
+        // Ease out cubic
+        const eased = 1 - Math.pow(1 - progress, 3)
+
+        // Interpolate position
+        zone.position.lerpVectors(startPos, targetPos, eased)
+        zone.group.position.set(zone.position.x, zone.group.position.y, zone.position.z)
+
+        // Update related elements
+        if (zone.edgeLines) {
+          zone.edgeLines.position.set(zone.position.x, 0, zone.position.z)
+        }
+        if (zone.sideMesh) {
+          zone.sideMesh.position.set(zone.position.x, 0, zone.position.z)
+        }
+
+        // Update zone notifications position
+        this.zoneNotifications.registerZone(zone.id, zone.position)
+
+        // Update station panels
+        this.stationPanels.updateZonePosition(zone.id, zone.position)
+
+        if (progress < 1) {
+          requestAnimationFrame(animate)
+        } else {
+          resolve()
+        }
+      }
+
+      requestAnimationFrame(animate)
+    })
+  }
+
+  /**
+   * Update zone visual prominence based on activity level
+   * @param sessionId - Zone to update
+   * @param activityScore - 0-1 score (higher = more active)
+   */
+  updateZoneActivityLevel(sessionId: string, activityScore: number): void {
+    const zone = this.zones.get(sessionId)
+    if (!zone) return
+
+    // Adjust ring brightness based on activity
+    if (zone.ring && zone.ring.material instanceof THREE.MeshBasicMaterial) {
+      const baseOpacity = 0.6
+      const maxOpacity = 1.0
+      zone.ring.material.opacity = baseOpacity + (maxOpacity - baseOpacity) * activityScore
+    }
+
+    // Add subtle pulsing for high activity zones
+    if (activityScore > 0.7 && !zone.activityPulse) {
+      zone.activityPulse = true
+      // Pulsing is handled in the animation loop
+    } else if (activityScore <= 0.7) {
+      zone.activityPulse = false
+    }
+  }
+
+  /**
+   * Check if zones can be compacted
+   */
+  canCompactZones(): boolean {
+    return this.hexGrid.canCompact()
+  }
+
+  /**
+   * Get grid spread factor (how spread out zones are)
+   */
+  getGridSpreadFactor(): number {
+    return this.hexGrid.getSpreadFactor()
   }
 
   /**

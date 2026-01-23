@@ -21,10 +21,7 @@ interface StationPanel {
 }
 
 // Station display names and colors
-const STATION_CONFIG: Record<
-  StationType,
-  { name: string; color: string; icon: string }
-> = {
+const STATION_CONFIG: Record<StationType, { name: string; color: string; icon: string }> = {
   center: { name: 'CENTER', color: '#4ac8e8', icon: '' },
   bookshelf: { name: 'LIBRARY', color: '#fbbf24', icon: '' },
   desk: { name: 'DESK', color: '#4ade80', icon: '' },
@@ -66,11 +63,7 @@ export class StationPanels {
   /**
    * Create panels for a zone
    */
-  createPanelsForZone(
-    zoneId: string,
-    zonePosition: THREE.Vector3,
-    zoneColor: number
-  ): void {
+  createPanelsForZone(zoneId: string, zonePosition: THREE.Vector3, zoneColor: number): void {
     const zonePanels = new Map<StationType, StationPanel>()
 
     for (const [stationType, offset] of Object.entries(STATION_OFFSETS)) {
@@ -116,13 +109,29 @@ export class StationPanels {
   }
 
   /**
+   * Update panel positions when a zone moves
+   */
+  updateZonePosition(zoneId: string, newPosition: THREE.Vector3): void {
+    const zonePanels = this.panels.get(zoneId)
+    if (!zonePanels) return
+
+    for (const [stationType, panel] of zonePanels) {
+      const offset = STATION_OFFSETS[stationType]
+      if (!offset) continue
+
+      const [ox, , oz] = offset
+      panel.sprite.position.set(
+        newPosition.x + ox * 0.7,
+        newPosition.y + 3.5,
+        newPosition.z + oz * 0.7
+      )
+    }
+  }
+
+  /**
    * Add a tool use to station history
    */
-  addToolUse(
-    zoneId: string,
-    station: StationType,
-    item: Omit<ToolHistoryItem, 'timestamp'>
-  ): void {
+  addToolUse(zoneId: string, station: StationType, item: Omit<ToolHistoryItem, 'timestamp'>): void {
     const zonePanels = this.panels.get(zoneId)
     if (!zonePanels) return
 
@@ -195,11 +204,7 @@ export class StationPanels {
     })
 
     const sprite = new THREE.Sprite(material)
-    sprite.scale.set(
-      PANEL_SCALE,
-      PANEL_SCALE * (CANVAS_HEIGHT / CANVAS_WIDTH),
-      1
-    )
+    sprite.scale.set(PANEL_SCALE, PANEL_SCALE * (CANVAS_HEIGHT / CANVAS_WIDTH), 1)
 
     // Render initial state
     this.renderPanelCanvas(canvas, stationType, [])

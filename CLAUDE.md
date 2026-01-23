@@ -407,6 +407,54 @@ initAchievementNotifications() // Set up unlock toasts
 showAchievementsModal() // Open the achievements panel
 ```
 
+### `src/systems/ZoneActivitySystem.ts`
+
+Zone activity tracking for dynamic zone prominence:
+
+- Tracks tool usage counts per session
+- Activity scoring with time decay (60 second window)
+- Relative scoring (most active zone = 1.0)
+- Event callbacks for visual updates
+
+```typescript
+import { zoneActivitySystem } from './systems/ZoneActivitySystem'
+
+// Track tool usage
+zoneActivitySystem.trackToolUse(sessionId, 'Read')
+
+// Query activity
+const metrics = zoneActivitySystem.getMetrics(sessionId)
+const level = zoneActivitySystem.getActivityLevel(sessionId) // 'high' | 'medium' | 'low' | 'idle'
+const mostActive = zoneActivitySystem.getMostActive()
+
+// Subscribe to changes
+zoneActivitySystem.onActivity((sessionId, metrics) => {
+  scene.updateZoneActivityLevel(sessionId, metrics.activityScore)
+})
+```
+
+### `src/utils/HexGrid.ts`
+
+Hexagonal grid utilities with zone placement and compaction:
+
+- Axial/cube/cartesian coordinate conversions
+- Spiral placement algorithm for new zones
+- **Auto-compact** - Fill gaps when zones are removed
+- Spread factor calculation for grid optimization
+
+```typescript
+const grid = new HexGrid(10, 1.1) // radius, spacing
+
+// Check if compaction would help
+if (grid.canCompact()) {
+  const moves = grid.calculateCompactPositions()
+  grid.applyPositionChanges(moves)
+}
+
+// Get spread factor (1.0 = ideal, higher = more spread out)
+const spread = grid.getSpreadFactor()
+```
+
 ### `src/ui/DrawMode.ts`
 
 Hex painting mode for decorative coloring:
@@ -771,6 +819,9 @@ Client rebuilds its local `claudeToManagedLink` map from server data on every `s
 - **Loading spinner**: Inline CSS loader shown immediately while app initializes
 - **Character personalities**: AfroSamurai with speech bubbles and contextual phrases
 - **Improved character animations**: Wizard animation fixes, base position tracking
+- **Zone activity tracking**: Dynamic zone prominence based on tool usage (ZoneActivitySystem)
+- **Grid auto-compact**: Shift+C to fill gaps when zones are removed
+- **Animated zone movement**: Smooth transitions when zones are repositioned
 
 ## Sound System
 
@@ -922,6 +973,8 @@ setInterval(() => {
 | `P`                | Not in input | Toggle station panels (tool history)                                      |
 | `Alt+D`            | Anywhere     | Toggle dev panel                                                          |
 | `D`                | Not in input | Toggle draw mode                                                          |
+| `Shift+C`          | Not in input | Compact zones (fill gaps in grid)                                         |
+| `Shift+R`          | Not in input | Toggle replay mode                                                        |
 | `Ctrl+C`           | Not in input | Context-aware: copy if text selected, interrupt working session otherwise |
 
 **Draw Mode Keys (when active):**

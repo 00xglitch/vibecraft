@@ -22,7 +22,12 @@ import type { ICharacter, CharacterOptions } from './entities/ICharacter'
 import { SubagentManager } from './entities/SubagentManager'
 import { EventClient } from './events/EventClient'
 import { eventBus, type EventContext, type EventType } from './events/EventBus'
-import { registerAllHandlers, configureCommitHandlers, updateConfetti } from './events/handlers'
+import {
+  registerAllHandlers,
+  configureCommitHandlers,
+  configureActivityHandlers,
+  updateConfetti,
+} from './events/handlers'
 import {
   type ClaudeEvent,
   type PreToolUseEvent,
@@ -3936,6 +3941,9 @@ function init() {
     updateConfetti(delta)
   })
 
+  // Configure activity tracking for dynamic zone prominence
+  configureActivityHandlers(state.scene)
+
   // Connect to event server
   state.client = new EventClient({
     url: WS_URL,
@@ -4400,6 +4408,32 @@ function init() {
         await enterReplayMode()
       } else {
         exitReplayMode()
+      }
+    }
+  })
+
+  // Shift+C to compact zones (fill gaps in grid)
+  document.addEventListener('keydown', async (e) => {
+    if (e.shiftKey && (e.key === 'c' || e.key === 'C')) {
+      const inInput =
+        e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement
+      if (inInput) return
+      if (!state.scene) return
+
+      e.preventDefault()
+      if (state.scene.canCompactZones()) {
+        console.log('Compacting zones...')
+        await state.scene.compactZones()
+        // Save updated zone positions to server
+        for (const [sessionId] of state.sessions) {
+          const hexPos = state.scene.getZoneHexPosition(sessionId)
+          const managed = state.managedSessions.find((m) => m.claudeSessionId === sessionId)
+          if (hexPos && managed) {
+            saveZonePosition(managed.id, hexPos)
+          }
+        }
+      } else {
+        console.log('Zones are already compact')
       }
     }
   })

@@ -11,8 +11,8 @@
  */
 
 export interface HexCoord {
-  q: number  // axial column
-  r: number  // axial row
+  q: number // axial column
+  r: number // axial row
 }
 
 interface CubeCoord {
@@ -23,19 +23,19 @@ interface CubeCoord {
 
 // Direction vectors for the 6 neighbors (pointy-top, counterclockwise from east)
 const HEX_DIRECTIONS: HexCoord[] = [
-  { q: 1, r: 0 },   // east
-  { q: 1, r: -1 },  // northeast
-  { q: 0, r: -1 },  // northwest
-  { q: -1, r: 0 },  // west
-  { q: -1, r: 1 },  // southwest
-  { q: 0, r: 1 },   // southeast
+  { q: 1, r: 0 }, // east
+  { q: 1, r: -1 }, // northeast
+  { q: 0, r: -1 }, // northwest
+  { q: -1, r: 0 }, // west
+  { q: -1, r: 1 }, // southwest
+  { q: 0, r: 1 }, // southeast
 ]
 
 export class HexGrid {
   readonly hexRadius: number
   readonly spacing: number
-  readonly hexWidth: number   // √3 * radius * spacing
-  readonly hexHeight: number  // 2 * radius * spacing
+  readonly hexWidth: number // √3 * radius * spacing
+  readonly hexHeight: number // 2 * radius * spacing
 
   // Occupancy tracking: "q,r" → sessionId
   private occupied = new Map<string, string>()
@@ -148,7 +148,7 @@ export class HexGrid {
    * Get the 6 neighboring hex cells
    */
   getNeighbors(hex: HexCoord): HexCoord[] {
-    return HEX_DIRECTIONS.map(dir => ({
+    return HEX_DIRECTIONS.map((dir) => ({
       q: hex.q + dir.q,
       r: hex.r + dir.r,
     }))
@@ -257,7 +257,7 @@ export class HexGrid {
     }
 
     // Spiral outward from target
-    const maxRings = 50  // Should be more than enough
+    const maxRings = 50 // Should be more than enough
 
     for (let ring = 1; ring <= maxRings; ring++) {
       const hexesInRing = this.getHexesInRing(target, ring)
@@ -288,12 +288,12 @@ export class HexGrid {
    */
   getNextInSpiral(): HexCoord {
     // Find next unoccupied hex in spiral order
-    const maxIndex = 1000  // More than enough hexes
+    const maxIndex = 1000 // More than enough hexes
 
     for (let i = this.spiralIndex; i < maxIndex; i++) {
       const hex = this.indexToHexCoord(i)
       if (!this.isOccupied(hex)) {
-        this.spiralIndex = i + 1  // Start here next time
+        this.spiralIndex = i + 1 // Start here next time
         return hex
       }
     }
@@ -312,7 +312,7 @@ export class HexGrid {
     for (let i = this.spiralIndex; i < maxIndex; i++) {
       const hex = this.indexToHexCoord(i)
       if (!this.isOccupied(hex)) {
-        return hex  // Don't update spiralIndex
+        return hex // Don't update spiralIndex
       }
     }
 
@@ -418,5 +418,127 @@ export class HexGrid {
     this.occupied.clear()
     this.sessionToHex.clear()
     this.spiralIndex = 0
+  }
+
+  // ============================================================================
+  // Grid Optimization / Auto-Compact
+  // ============================================================================
+
+  /**
+   * Calculate optimal positions to compact zones toward center
+   * Returns a map of sessionId -> new hex position
+   * Does NOT modify state - caller should apply the moves
+   */
+  calculateCompactPositions(): Map<string, HexCoord> {
+    const moves = new Map<string, HexCoord>()
+    const sessions = Array.from(this.sessionToHex.entries())
+
+    if (sessions.length === 0) return moves
+
+    // Sort sessions by current distance from center (closest first)
+    sessions.sort((a, b) => {
+      const hexA = this.parseHexKey(a[1])
+      const hexB = this.parseHexKey(b[1])
+      return this.distance(hexA, { q: 0, r: 0 }) - this.distance(hexB, { q: 0, r: 0 })
+    })
+
+    // Build set of positions that will be occupied after compaction
+    const newOccupied = new Set<string>()
+
+    for (const [sessionId] of sessions) {
+      // Find the closest unoccupied position in spiral order
+      const maxIndex = 1000
+      for (let i = 0; i < maxIndex; i++) {
+        const hex = this.indexToHexCoord(i)
+        const key = this.hexKey(hex)
+
+        if (!newOccupied.has(key)) {
+          newOccupied.add(key)
+          const currentHex = this.getSessionHex(sessionId)
+
+          // Only add to moves if position actually changes
+          if (currentHex && !this.equals(currentHex, hex)) {
+            moves.set(sessionId, hex)
+          }
+          break
+        }
+      }
+    }
+
+    return moves
+  }
+
+  /**
+   * Check if zones can be compacted (any gaps in spiral order)
+   */
+  canCompact(): boolean {
+    const occupied = this.getOccupiedHexes()
+    if (occupied.length <= 1) return false
+
+    // Check if all occupied hexes are in the first N positions of the spiral
+    for (let i = 0; i < occupied.length; i++) {
+      const idealHex = this.indexToHexCoord(i)
+      const hasIdealOccupied = occupied.some((o) => this.equals(o.hex, idealHex))
+      if (!hasIdealOccupied) return true // Gap found
+    }
+
+    return false
+  }
+
+  /**
+   * Get the "spread" of zones - ratio of max ring to zone count
+   * Lower values mean more compact arrangement
+   */
+  getSpreadFactor(): number {
+    const occupied = this.getOccupiedHexes()
+    if (occupied.length === 0) return 0
+
+    let maxRing = 0
+    for (const { hex } of occupied) {
+      const ring = this.distance(hex, { q: 0, r: 0 })
+      if (ring > maxRing) maxRing = ring
+    }
+
+    // Ideal would be all zones filling rings from center
+    // First N hexes fill rings: 1 (center) + 6*1 + 6*2 + ... = 1 + 6*(1+2+...+r) = 1 + 3*r*(r+1)
+    // Approximate ideal ring for N zones
+    const n = occupied.length
+    const idealRing = n <= 1 ? 0 : Math.ceil(Math.sqrt((n - 1) / 3))
+
+    return idealRing > 0 ? maxRing / idealRing : maxRing
+  }
+
+  /**
+   * Apply a set of position changes (used after calculateCompactPositions)
+   * Returns the old positions for undo capability
+   */
+  applyPositionChanges(changes: Map<string, HexCoord>): Map<string, HexCoord> {
+    const oldPositions = new Map<string, HexCoord>()
+
+    for (const [sessionId, newHex] of changes) {
+      const oldHex = this.getSessionHex(sessionId)
+      if (oldHex) {
+        oldPositions.set(sessionId, oldHex)
+        // Release old position
+        this.release(sessionId)
+      }
+    }
+
+    // Occupy new positions
+    for (const [sessionId, newHex] of changes) {
+      this.occupy(newHex, sessionId)
+    }
+
+    // Reset spiral to find first gap
+    this.resetSpiral()
+
+    return oldPositions
+  }
+
+  /**
+   * Get total number of occupied hexes
+   */
+  getZoneCount(): number {
+    return this.occupied.size
   }
 }
