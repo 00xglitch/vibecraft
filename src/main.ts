@@ -75,6 +75,8 @@ import { setupReplayControls, type ReplayControls } from './ui/ReplayControls'
 import { initializePluginsInModal, pluginManager } from './plugins'
 import { achievementSystem } from './systems/AchievementSystem'
 import { showAchievementsModal, initAchievementNotifications } from './ui/AchievementsModal'
+import { tokenTrackingSystem } from './systems/TokenTrackingSystem'
+import { showTokenStatsModal } from './ui/TokenStatsModal'
 
 // ============================================================================
 // Configuration
@@ -3998,6 +4000,20 @@ function init() {
       achievementSystem.trackTokens(data.current)
     }
 
+    // Track in token tracking system (per-session with history)
+    if (data.sessionId) {
+      const session = state.managedSessions.find((s) => s.id === data.sessionId)
+      tokenTrackingSystem.updateSession(data.sessionId, data.current, data.cumulative, {
+        sessionName: session?.name,
+        model:
+          session?.modelID === 'opus'
+            ? 'claude-opus-4'
+            : session?.modelID === 'haiku'
+              ? 'claude-3.5-haiku'
+              : 'claude-sonnet-4',
+      })
+    }
+
     // Update feed panel stat
     const tokensEl = document.getElementById('stat-tokens')
     if (tokensEl) {
@@ -4438,6 +4454,18 @@ function init() {
     }
   })
 
+  // Shift+T to open token stats modal
+  document.addEventListener('keydown', (e) => {
+    if (e.shiftKey && (e.key === 't' || e.key === 'T')) {
+      const inInput =
+        e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement
+      if (inInput) return
+
+      e.preventDefault()
+      showTokenStatsModal()
+    }
+  })
+
   // Setup click-to-prompt and context menu
   setupContextMenu()
   setupClickToPrompt()
@@ -4565,6 +4593,15 @@ function init() {
 
   // Initialize achievement notifications
   initAchievementNotifications()
+
+  // Initialize token alert notifications
+  tokenTrackingSystem.onAlert((alert) => {
+    if (alert.type === 'critical') {
+      toast.error(alert.message, { duration: 5000 })
+    } else {
+      toast.warning(alert.message, { duration: 4000 })
+    }
+  })
 
   // Set up achievements button in header
   setupAchievementsButton()

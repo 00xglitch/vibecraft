@@ -407,6 +407,63 @@ initAchievementNotifications() // Set up unlock toasts
 showAchievementsModal() // Open the achievements panel
 ```
 
+### `src/systems/TokenTrackingSystem.ts`
+
+Comprehensive token usage tracking with cost estimates:
+
+- Per-session token tracking (current context + cumulative)
+- Historical time-series data with configurable intervals
+- Cost estimation based on Claude model pricing (opus, sonnet, haiku)
+- Configurable alerts for session and daily limits
+- localStorage persistence for history across sessions
+
+```typescript
+import { tokenTrackingSystem } from './systems/TokenTrackingSystem'
+
+// Update session tokens (called from onTokens callback)
+tokenTrackingSystem.updateSession(sessionId, current, cumulative, {
+  sessionName: 'My Session',
+  model: 'claude-sonnet-4',
+})
+
+// Query stats
+const session = tokenTrackingSystem.getSessionStats(sessionId)
+const global = tokenTrackingSystem.getGlobalStats()
+// { totalCurrent, totalCumulative, totalCost, sessionCount, dailyUsage }
+
+// Configure limits
+tokenTrackingSystem.setLimits({
+  sessionWarning: 500_000,
+  sessionCritical: 1_000_000,
+  globalDaily: 5_000_000,
+})
+
+// Subscribe to alerts
+tokenTrackingSystem.onAlert((alert) => {
+  // alert.type: 'warning' | 'critical'
+  toast[alert.type === 'critical' ? 'error' : 'warning'](alert.message)
+})
+
+// Formatting helpers
+tokenTrackingSystem.formatTokens(1500000) // "1.5M"
+tokenTrackingSystem.formatCost(0.005) // "$0.50¢"
+```
+
+### `src/ui/TokenStatsModal.ts`
+
+Token usage statistics modal (Shift+T to open):
+
+- Overview tab: Global stats grid and model pricing table
+- Sessions tab: Per-session breakdown with progress bars
+- Alerts tab: Warning and critical alert history
+- Settings tab: Configure token limits
+
+```typescript
+import { showTokenStatsModal } from './ui/TokenStatsModal'
+
+showTokenStatsModal() // Toggle modal visibility
+```
+
 ### `src/systems/ZoneActivitySystem.ts`
 
 Zone activity tracking for dynamic zone prominence:
@@ -522,6 +579,7 @@ CSS is organized into modular files:
 | `prompt.css`   | Prompt input, voice control, transcript                         |
 | `hud.css`      | Scene HUD, keybinds, timeline                                   |
 | `modals.css`   | All modal styles (click menu, settings, questions, permissions) |
+| `tokens.css`   | Token stats modal styles                                        |
 
 CSS is imported in `main.ts` via `import './styles/index.css'` and bundled by Vite.
 
@@ -822,6 +880,7 @@ Client rebuilds its local `claudeToManagedLink` map from server data on every `s
 - **Zone activity tracking**: Dynamic zone prominence based on tool usage (ZoneActivitySystem)
 - **Grid auto-compact**: Shift+C to fill gaps when zones are removed
 - **Animated zone movement**: Smooth transitions when zones are repositioned
+- **Token tracking system**: Per-session token usage with cost estimates, alerts, and historical data (Shift+T for stats modal)
 
 ## Sound System
 
@@ -975,6 +1034,7 @@ setInterval(() => {
 | `D`                | Not in input | Toggle draw mode                                                          |
 | `Shift+C`          | Not in input | Compact zones (fill gaps in grid)                                         |
 | `Shift+R`          | Not in input | Toggle replay mode                                                        |
+| `Shift+T`          | Not in input | Open token usage stats modal                                              |
 | `Ctrl+C`           | Not in input | Context-aware: copy if text selected, interrupt working session otherwise |
 
 **Draw Mode Keys (when active):**
