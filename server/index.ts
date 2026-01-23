@@ -77,6 +77,22 @@ import {
 import { ChangeTracker } from './ChangeTracker.js'
 import { julesService } from './JulesService.js'
 import { mcpMarketplace } from './MCPMarketplace.js'
+import {
+  detectEnvironment,
+  getEnvironment,
+  formatEnvironmentInfo,
+  getHostWorkspaces,
+  type EnvironmentInfo,
+} from './environment.js'
+import {
+  toDisplayPath,
+  toExecutionPath,
+  autoDetectMappings,
+  wslToWindows,
+  windowsToWSL,
+  isWindowsPath,
+  isWSLMountPath,
+} from './pathTranslation.js'
 
 // ============================================================================
 // OpenCode Integration State
@@ -2309,6 +2325,103 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
     return
   }
 
+  // Environment info
+  if (req.method === 'GET' && req.url === '/api/environment') {
+    const env = getEnvironment()
+    const workspaces = getHostWorkspaces(env)
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(
+      JSON.stringify({
+        ok: true,
+        environment: env,
+        workspaces,
+      })
+    )
+    return
+  }
+
+  // Path translation - translate to display path
+  if (req.method === 'POST' && req.url === '/api/path/to-display') {
+    collectRequestBody(req)
+      .then(async (body) => {
+        try {
+          if (!body) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ ok: false, error: 'Request body required' }))
+            return
+          }
+          const { path: sourcePath } = JSON.parse(body)
+          if (!sourcePath) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ ok: false, error: 'path is required' }))
+            return
+          }
+          const displayPath = await toDisplayPath(sourcePath)
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: true, displayPath }))
+        } catch (e) {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: (e as Error).message }))
+        }
+      })
+      .catch(() => {
+        res.writeHead(413, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Request body too large' }))
+      })
+    return
+  }
+
+  // Path translation - translate to execution path
+  if (req.method === 'POST' && req.url === '/api/path/to-execution') {
+    collectRequestBody(req)
+      .then(async (body) => {
+        try {
+          if (!body) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ ok: false, error: 'Request body required' }))
+            return
+          }
+          const { path: displayPath } = JSON.parse(body)
+          if (!displayPath) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ ok: false, error: 'path is required' }))
+            return
+          }
+          const executionPath = await toExecutionPath(displayPath)
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: true, executionPath }))
+        } catch (e) {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: (e as Error).message }))
+        }
+      })
+      .catch(() => {
+        res.writeHead(413, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Request body too large' }))
+      })
+    return
+  }
+
+  // Path mappings - get all auto-detected mappings
+  if (req.method === 'GET' && req.url === '/api/path/mappings') {
+    const env = getEnvironment()
+    autoDetectMappings(env)
+      .then((mappings) => {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(
+          JSON.stringify({
+            ok: true,
+            mappings,
+          })
+        )
+      })
+      .catch((e) => {
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: (e as Error).message }))
+      })
+    return
+  }
+
   // Config (username, etc)
   if (req.method === 'GET' && req.url === '/config') {
     const username = process.env.USER || process.env.USERNAME || 'claude-user'
@@ -3846,6 +3959,23 @@ function serveStaticFile(req: IncomingMessage, res: ServerResponse): void {
 
 async function main() {
   log('Starting Vibecraft server...')
+
+  // Detect runtime environment
+  const env = detectEnvironment()
+  log('\nEnvironment detected:')
+  log(formatEnvironmentInfo(env))
+  log('')
+
+  // Log available workspaces
+  const workspaces = getHostWorkspaces(env)
+  if (workspaces.length > 0) {
+    log(`Available workspaces (${workspaces.length}):`)
+    workspaces.slice(0, 5).forEach((ws) => log(`  - ${ws}`))
+    if (workspaces.length > 5) {
+      log(`  ... and ${workspaces.length - 5} more`)
+    }
+    log('')
+  }
 
   // Load Deepgram API key for voice transcription
   deepgramApiKey = loadDeepgramKey()
