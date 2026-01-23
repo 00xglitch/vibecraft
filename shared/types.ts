@@ -441,10 +441,16 @@ export interface CreateImplicitSessionRequest {
 /** Request to update a session */
 export interface UpdateSessionRequest {
   name?: string
+  /** Working directory */
+  cwd?: string
+  /** Model ID (for Claude/OpenCode sessions) */
+  modelID?: string
   zonePosition?: {
     q: number
     r: number
   }
+  /** Zone visual customization */
+  zoneCustomization?: ZoneCustomization
   /** Pin/unpin session (pinned sessions appear at top) */
   pinned?: boolean
   /** Sort order within pinned/unpinned group */

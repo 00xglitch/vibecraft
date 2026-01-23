@@ -3575,6 +3575,72 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
       return
     }
 
+    // PATCH /sessions/:id - Update session properties
+    if (req.method === 'PATCH' && !action) {
+      collectRequestBody(req)
+        .then((body) => {
+          try {
+            if (!body) {
+              res.writeHead(400, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ ok: false, error: 'Request body required' }))
+              return
+            }
+
+            const updates = JSON.parse(body) as UpdateSessionRequest
+            const session = getSession(sessionId)
+
+            if (!session) {
+              res.writeHead(404, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ ok: false, error: 'Session not found' }))
+              return
+            }
+
+            // Update allowed properties
+            if (updates.name !== undefined) {
+              session.name = updates.name
+            }
+            if (updates.cwd !== undefined) {
+              session.cwd = updates.cwd
+            }
+            if (updates.modelID !== undefined) {
+              session.modelID = updates.modelID
+            }
+            if (updates.zoneCustomization !== undefined) {
+              session.zoneCustomization = updates.zoneCustomization
+            }
+            if (updates.zonePosition !== undefined) {
+              session.zonePosition = updates.zonePosition
+            }
+            if (updates.pinned !== undefined) {
+              session.pinned = updates.pinned
+            }
+            if (updates.sortOrder !== undefined) {
+              session.sortOrder = updates.sortOrder
+            }
+            if (updates.archived !== undefined) {
+              session.archived = updates.archived
+            }
+
+            // Save sessions to disk
+            saveSessions()
+
+            // Broadcast updated sessions to all clients
+            broadcastSessions()
+
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ ok: true, session }))
+          } catch (e) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ ok: false, error: (e as Error).message }))
+          }
+        })
+        .catch(() => {
+          res.writeHead(413, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Request body too large' }))
+        })
+      return
+    }
+
     // DELETE /sessions/:id - Kill session
     if (req.method === 'DELETE' && !action) {
       deleteSession(sessionId).then((deleted) => {
