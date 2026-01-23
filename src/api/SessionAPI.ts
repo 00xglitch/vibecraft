@@ -220,6 +220,21 @@ export function createSessionAPI(apiUrl: string) {
         return { ok: false, error: 'Network error' }
       }
     },
+
+    /**
+     * Cancel/interrupt a managed session (send Ctrl+C)
+     */
+    async cancelSession(sessionId: string): Promise<SimpleResponse> {
+      try {
+        const response = await fetch(`${apiUrl}/sessions/${sessionId}/cancel`, {
+          method: 'POST',
+        })
+        return await response.json()
+      } catch (e) {
+        console.error('Error cancelling session:', e)
+        return { ok: false, error: 'Network error' }
+      }
+    },
   }
 }
 

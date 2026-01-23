@@ -1929,7 +1929,25 @@ function addEvent(event: ClaudeEvent) {
   }
 
   // Update managed session status based on event
-  const managedSession = findManagedSession(event.sessionId)
+  // First try by claudeSessionId, then by tmuxSession for auto-linking
+  let managedSession = findManagedSession(event.sessionId)
+
+  // If not found by claudeSessionId but event has tmuxSession, try tmuxSession-based matching
+  if (!managedSession && event.tmuxSession) {
+    const managedIdFromTmux = tmuxToManagedMap.get(event.tmuxSession)
+    if (managedIdFromTmux) {
+      managedSession = managedSessions.get(managedIdFromTmux)
+      if (managedSession && !managedSession.claudeSessionId) {
+        // Auto-link: we found the session by tmux name, link the claudeSessionId
+        managedSession.claudeSessionId = event.sessionId
+        claudeToManagedMap.set(event.sessionId, managedIdFromTmux)
+        log(`Auto-linked session via tmuxSession: ${event.sessionId} -> ${managedSession.name}`)
+        broadcastSessions()
+        saveSessions()
+      }
+    }
+  }
+
   if (managedSession) {
     const prevStatus = managedSession.status
     managedSession.lastActivity = Date.now() // Use current time for accurate timeout tracking

@@ -92,6 +92,21 @@ hook_event_name=$(echo "$input" | "$JQ" -r '.hook_event_name // "unknown"')
 session_id=$(echo "$input" | "$JQ" -r '.session_id // "unknown"')
 cwd=$(echo "$input" | "$JQ" -r '.cwd // ""')
 
+# Exit early if not inside a tmux session at all
+# $TMUX is only set when actually running inside tmux
+if [[ -z "$TMUX" ]]; then
+  exit 0
+fi
+
+# Capture tmux session name (for definitive session matching)
+tmux_session=$(tmux display-message -p '#{session_name}' 2>/dev/null || echo "")
+
+# Exit early if not a vibecraft-managed session
+# This keeps external Claude sessions from polluting the event stream
+if [[ ! "$tmux_session" =~ ^vibecraft- ]]; then
+  exit 0
+fi
+
 # Generate unique event ID and timestamp
 # macOS doesn't support date +%N, so we use different approaches
 if [[ "$OSTYPE" == "darwin"* ]]; then
@@ -159,6 +174,7 @@ case "$event_type" in
       --arg type "$event_type" \
       --arg sessionId "$session_id" \
       --arg cwd "$cwd" \
+      --arg tmuxSession "$tmux_session" \
       --arg tool "$tool_name" \
       --argjson toolInput "$tool_input" \
       --arg toolUseId "$tool_use_id" \
@@ -169,6 +185,7 @@ case "$event_type" in
         type: $type,
         sessionId: $sessionId,
         cwd: $cwd,
+        tmuxSession: $tmuxSession,
         tool: $tool,
         toolInput: $toolInput,
         toolUseId: $toolUseId,
@@ -189,6 +206,7 @@ case "$event_type" in
       --arg type "$event_type" \
       --arg sessionId "$session_id" \
       --arg cwd "$cwd" \
+      --arg tmuxSession "$tmux_session" \
       --arg tool "$tool_name" \
       --argjson toolInput "$tool_input" \
       --argjson toolResponse "$tool_response" \
@@ -200,6 +218,7 @@ case "$event_type" in
         type: $type,
         sessionId: $sessionId,
         cwd: $cwd,
+        tmuxSession: $tmuxSession,
         tool: $tool,
         toolInput: $toolInput,
         toolResponse: $toolResponse,
@@ -225,6 +244,7 @@ case "$event_type" in
       --arg type "$event_type" \
       --arg sessionId "$session_id" \
       --arg cwd "$cwd" \
+      --arg tmuxSession "$tmux_session" \
       --argjson stopHookActive "$stop_hook_active" \
       --arg response "$assistant_response" \
       '{
@@ -233,6 +253,7 @@ case "$event_type" in
         type: $type,
         sessionId: $sessionId,
         cwd: $cwd,
+        tmuxSession: $tmuxSession,
         stopHookActive: $stopHookActive,
         response: $response
       }')
@@ -247,6 +268,7 @@ case "$event_type" in
       --arg type "$event_type" \
       --arg sessionId "$session_id" \
       --arg cwd "$cwd" \
+      --arg tmuxSession "$tmux_session" \
       --arg source "$source_type" \
       '{
         id: $id,
@@ -254,6 +276,7 @@ case "$event_type" in
         type: $type,
         sessionId: $sessionId,
         cwd: $cwd,
+        tmuxSession: $tmuxSession,
         source: $source
       }')
     ;;
@@ -267,6 +290,7 @@ case "$event_type" in
       --arg type "$event_type" \
       --arg sessionId "$session_id" \
       --arg cwd "$cwd" \
+      --arg tmuxSession "$tmux_session" \
       --arg reason "$reason" \
       '{
         id: $id,
@@ -274,6 +298,7 @@ case "$event_type" in
         type: $type,
         sessionId: $sessionId,
         cwd: $cwd,
+        tmuxSession: $tmuxSession,
         reason: $reason
       }')
     ;;
@@ -287,6 +312,7 @@ case "$event_type" in
       --arg type "$event_type" \
       --arg sessionId "$session_id" \
       --arg cwd "$cwd" \
+      --arg tmuxSession "$tmux_session" \
       --arg prompt "$prompt" \
       '{
         id: $id,
@@ -294,6 +320,7 @@ case "$event_type" in
         type: $type,
         sessionId: $sessionId,
         cwd: $cwd,
+        tmuxSession: $tmuxSession,
         prompt: $prompt
       }')
     ;;
@@ -308,6 +335,7 @@ case "$event_type" in
       --arg type "$event_type" \
       --arg sessionId "$session_id" \
       --arg cwd "$cwd" \
+      --arg tmuxSession "$tmux_session" \
       --arg message "$message" \
       --arg notificationType "$notification_type" \
       '{
@@ -316,6 +344,7 @@ case "$event_type" in
         type: $type,
         sessionId: $sessionId,
         cwd: $cwd,
+        tmuxSession: $tmuxSession,
         message: $message,
         notificationType: $notificationType
       }')
@@ -331,6 +360,7 @@ case "$event_type" in
       --arg type "$event_type" \
       --arg sessionId "$session_id" \
       --arg cwd "$cwd" \
+      --arg tmuxSession "$tmux_session" \
       --arg trigger "$trigger" \
       --arg customInstructions "$custom_instructions" \
       '{
@@ -339,6 +369,7 @@ case "$event_type" in
         type: $type,
         sessionId: $sessionId,
         cwd: $cwd,
+        tmuxSession: $tmuxSession,
         trigger: $trigger,
         customInstructions: $customInstructions
       }')
@@ -352,6 +383,7 @@ case "$event_type" in
       --arg type "unknown" \
       --arg sessionId "$session_id" \
       --arg cwd "$cwd" \
+      --arg tmuxSession "$tmux_session" \
       --argjson raw "$input" \
       '{
         id: $id,
@@ -359,6 +391,7 @@ case "$event_type" in
         type: $type,
         sessionId: $sessionId,
         cwd: $cwd,
+        tmuxSession: $tmuxSession,
         raw: $raw
       }')
     ;;

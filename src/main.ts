@@ -2506,7 +2506,6 @@ function handleEvent(event: ClaudeEvent, isHistory = false) {
 // ============================================================================
 
 const PROMPT_URL = `${API_URL}/prompt`
-const CANCEL_URL = `${API_URL}/cancel`
 const CONFIG_URL = `${API_URL}/config`
 
 async function fetchConfig() {
@@ -2526,7 +2525,7 @@ async function fetchConfig() {
  * Interrupt (Ctrl+C) the currently selected session
  * Called from keyboard shortcut handler
  */
-async function interruptSession(sessionName: string): Promise<void> {
+async function interruptSession(sessionId: string, sessionName: string): Promise<void> {
   // Show toast immediately
   toast.info(`Interrupt sent to ${sessionName}`, {
     icon: '⛔',
@@ -2535,8 +2534,7 @@ async function interruptSession(sessionName: string): Promise<void> {
   })
 
   try {
-    const response = await fetch(CANCEL_URL, { method: 'POST' })
-    const data = await response.json()
+    const data = await sessionAPI.cancelSession(sessionId)
 
     if (!data.ok) {
       toast.error(data.error || 'Interrupt failed', {
@@ -2651,13 +2649,22 @@ function setupPromptForm() {
   // Cancel button handler
   if (cancelBtn) {
     cancelBtn.addEventListener('click', async () => {
+      // Get the currently selected session
+      const sessionId = state.selectedManagedSession
+      if (!sessionId) {
+        if (status) {
+          status.textContent = 'No session selected'
+          status.className = 'error'
+        }
+        return
+      }
+
       if (status) {
         status.textContent = 'Cancelling...'
         status.className = ''
       }
       try {
-        const response = await fetch(CANCEL_URL, { method: 'POST' })
-        const data = await response.json()
+        const data = await sessionAPI.cancelSession(sessionId)
         if (status) {
           if (data.ok) {
             status.textContent = 'Cancelled!'
@@ -4080,7 +4087,7 @@ function init() {
         // Proactively create zone if it doesn't exist yet
         // This handles sessions that have no recent events in history
         if (state.scene && !state.scene.zones.has(session.claudeSessionId)) {
-          // Use saved position if available
+          // Use saved position if available, then check pendingZoneHints from click
           let hintPosition: { x: number; z: number } | undefined
           if (session.zonePosition) {
             const cartesian = state.scene.hexGrid.axialToCartesian(session.zonePosition)
@@ -4090,7 +4097,16 @@ function init() {
               session.zonePosition
             )
           } else {
-            console.log(`Creating zone for session "${session.name}" (no recent events in history)`)
+            // Check pendingZoneHints for click position (race condition fix)
+            const pendingHint = pendingZoneHints.get(session.name)
+            if (pendingHint) {
+              hintPosition = pendingHint
+              pendingZoneHints.delete(session.name)
+            } else {
+              console.log(
+                `Creating zone for session "${session.name}" (no recent events in history)`
+              )
+            }
           }
           const zone = state.scene.createZone(session.claudeSessionId, { hintPosition })
 
@@ -4100,6 +4116,19 @@ function init() {
           // Play zone creation sound
           if (state.soundEnabled) {
             soundManager.play('zone_create', { zoneId: session.claudeSessionId })
+          }
+
+          // Clean up pending zone now that real zone exists (race condition fix)
+          const pendingZoneId = pendingZonesToCleanup.get(session.name)
+          if (pendingZoneId) {
+            state.scene.removePendingZone(pendingZoneId)
+            pendingZonesToCleanup.delete(session.name)
+            // Clear the timeout since zone was created successfully
+            const timeoutId = pendingZoneTimeouts.get(pendingZoneId)
+            if (timeoutId) {
+              clearTimeout(timeoutId)
+              pendingZoneTimeouts.delete(pendingZoneId)
+            }
           }
 
           // Create character entity for this zone

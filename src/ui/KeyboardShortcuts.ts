@@ -29,10 +29,30 @@ import { drawMode } from './DrawMode'
  * 1-6, then left-hand keyboard rows: QWERTY, ASDFGH, ZXCVBN
  */
 export const SESSION_KEYBINDS = [
-  '1', '2', '3', '4', '5', '6',
-  'Q', 'W', 'E', 'R', 'T', 'Y',
-  'A', 'S', 'D', 'F', 'G', 'H',
-  'Z', 'X', 'C', 'V', 'B', 'N',
+  '1',
+  '2',
+  '3',
+  '4',
+  '5',
+  '6',
+  'Q',
+  'W',
+  'E',
+  'R',
+  'T',
+  'Y',
+  'A',
+  'S',
+  'D',
+  'F',
+  'G',
+  'H',
+  'Z',
+  'X',
+  'C',
+  'V',
+  'B',
+  'N',
 ]
 
 /**
@@ -78,7 +98,7 @@ export interface KeyboardShortcutContext {
   onGoToNextAttention: () => void
   onUpdateAttentionBadge: () => void
   onSetUserChangedCamera: (value: boolean) => void
-  onInterruptSession: (sessionName: string) => void
+  onInterruptSession: (sessionId: string, sessionName: string) => void
 }
 
 // ============================================================================
@@ -112,7 +132,7 @@ export function setupKeyboardShortcuts(ctx: KeyboardShortcutContext): void {
       const selectedSession = ctx.getSelectedManagedSession()
       if (selectedSession && selectedSession.status === 'working') {
         e.preventDefault()
-        ctx.onInterruptSession(selectedSession.name)
+        ctx.onInterruptSession(selectedSession.id, selectedSession.name)
         return
       }
 
@@ -145,7 +165,14 @@ export function setupKeyboardShortcuts(ctx: KeyboardShortcutContext): void {
     // ========================================================================
 
     // D key toggles draw mode (outside inputs, not in modals or context menus)
-    if (!inInput && !isModal && !isContextMenu && (e.key === 'd' || e.key === 'D') && !e.altKey && !e.ctrlKey) {
+    if (
+      !inInput &&
+      !isModal &&
+      !isContextMenu &&
+      (e.key === 'd' || e.key === 'D') &&
+      !e.altKey &&
+      !e.ctrlKey
+    ) {
       e.preventDefault()
       drawMode.toggle()
       return
@@ -289,6 +316,5 @@ export function setupKeyboardShortcuts(ctx: KeyboardShortcutContext): void {
       }
       return
     }
-
   })
 }

@@ -52,6 +52,8 @@ export interface BaseEvent {
   sessionId: string
   /** Current working directory */
   cwd: string
+  /** tmux session name (for definitive session matching) */
+  tmuxSession?: string
 }
 
 // ============================================================================
