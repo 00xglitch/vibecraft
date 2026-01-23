@@ -1609,11 +1609,22 @@ function saveSessions(): void {
           : session.tokens,
       }
     })
+
+    // Save with metadata for smart restoration
+    const env = getEnvironment()
     const data = {
+      version: VERSION,
+      savedAt: Date.now(),
+      environment: {
+        type: env.type,
+        platform: env.platform,
+        homeDir: env.homeDir,
+      },
       sessions: sessionsWithTokens,
       claudeToManagedMap: Array.from(claudeToManagedMap.entries()),
       sessionCounter,
     }
+
     writeFileSync(SESSIONS_FILE, JSON.stringify(data, null, 2))
     debug(`Saved ${managedSessions.size} sessions to ${SESSIONS_FILE}`)
   } catch (e) {
@@ -1622,9 +1633,9 @@ function saveSessions(): void {
 }
 
 /**
- * Load sessions from disk on startup
+ * Load sessions from disk on startup with smart restoration
  */
-function loadSessions(): void {
+async function loadSessions(): Promise<void> {
   if (!existsSync(SESSIONS_FILE)) {
     debug('No saved sessions file found')
     return
@@ -1634,17 +1645,53 @@ function loadSessions(): void {
     const content = readFileSync(SESSIONS_FILE, 'utf-8')
     const data = JSON.parse(content)
 
+    // Check environment compatibility
+    const currentEnv = getEnvironment()
+    let environmentChanged = false
+
+    if (data.environment) {
+      const savedEnv = data.environment
+      if (savedEnv.type !== currentEnv.type || savedEnv.platform !== currentEnv.platform) {
+        log(
+          `Environment changed: ${savedEnv.type}/${savedEnv.platform} → ${currentEnv.type}/${currentEnv.platform}`
+        )
+        environmentChanged = true
+      }
+    }
+
     // Restore sessions
     if (Array.isArray(data.sessions)) {
       for (const session of data.sessions) {
         // Mark all as offline initially - health check will update
         session.status = 'offline'
         session.currentTool = undefined
+
+        // Path translation if environment changed
+        if (environmentChanged && session.cwd) {
+          try {
+            // Try to translate path from saved environment to current environment
+            const translatedPath = await toExecutionPath(session.cwd)
+            if (translatedPath !== session.cwd) {
+              log(
+                `Translated path for session "${session.name}": ${session.cwd} → ${translatedPath}`
+              )
+              session.cwd = translatedPath
+            }
+          } catch (err) {
+            debug(
+              `Failed to translate path for session "${session.name}": ${(err as Error).message}`
+            )
+            // Keep original path, health check will mark as offline if invalid
+          }
+        }
+
         managedSessions.set(session.id, session)
+
         // Populate reverse lookup map
         if (session.tmuxSession) {
           tmuxToManagedMap.set(session.tmuxSession, session.id)
         }
+
         // Track git status if session has a cwd
         if (session.cwd) {
           gitStatusManager.track(session.id, session.cwd)
@@ -1664,7 +1711,14 @@ function loadSessions(): void {
       sessionCounter = data.sessionCounter
     }
 
+    // Log restoration info
+    const savedAt = data.savedAt ? new Date(data.savedAt).toLocaleString() : 'unknown'
+    const version = data.version || 'unknown'
     log(`Loaded ${managedSessions.size} sessions from ${SESSIONS_FILE}`)
+    log(`  Saved: ${savedAt} (version ${version})`)
+    if (environmentChanged) {
+      log(`  Environment changed - paths may need verification`)
+    }
   } catch (e) {
     console.error('Failed to load sessions:', e)
   }
@@ -4143,7 +4197,7 @@ async function main() {
   loadEventsFromFile()
 
   // Load saved sessions (for persistence across restarts)
-  loadSessions()
+  await loadSessions()
 
   // Load saved config (CLI command, etc.)
   loadConfig()
