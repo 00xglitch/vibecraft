@@ -327,6 +327,29 @@
 
         <!-- Claude Options -->
         <div class="modal-field" id="claude-options">
+          <label>Runtime Environment</label>
+          <div class="modal-checkboxes" style="margin-bottom: 12px">
+            <label class="modal-checkbox">
+              <input type="radio" name="runtime" value="tmux" checked />
+              <span class="checkbox-label">Local (tmux)</span>
+            </label>
+            <label class="modal-checkbox">
+              <input type="radio" name="runtime" value="docker" />
+              <span class="checkbox-label">Docker Container 🐳</span>
+            </label>
+          </div>
+
+          <!-- Docker-specific options (shown when docker selected) -->
+          <div id="docker-options" class="modal-field" style="display: none; margin-left: 20px; margin-bottom: 12px;">
+            <label>Memory Limit</label>
+            <select id="session-opt-memory" class="modal-select" style="width: 160px">
+              <option value="512M">512 MB</option>
+              <option value="1G" selected>1 GB</option>
+              <option value="2G">2 GB</option>
+              <option value="4G">4 GB</option>
+            </select>
+          </div>
+
           <label>Model</label>
           <div class="settings-select-row" style="margin-bottom: 12px">
             <select id="session-opt-model" class="modal-select" style="width: 160px">

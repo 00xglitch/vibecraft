@@ -14,6 +14,14 @@ export interface SessionFlags {
   worktree?: boolean
 }
 
+export interface DockerOptions {
+  workspace?: string
+  memory?: string
+  network?: string
+}
+
+export type SessionRuntime = 'tmux' | 'docker'
+
 export interface CreateSessionResponse {
   ok: boolean
   error?: string
@@ -42,13 +50,15 @@ export function createSessionAPI(apiUrl: string) {
     async createSession(
       name?: string,
       cwd?: string,
-      flags?: SessionFlags
+      flags?: SessionFlags,
+      runtime?: SessionRuntime,
+      docker?: DockerOptions
     ): Promise<CreateSessionResponse> {
       try {
         const response = await fetch(`${apiUrl}/sessions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, cwd, flags }),
+          body: JSON.stringify({ name, cwd, flags, runtime, docker }),
         })
         return await response.json()
       } catch (e) {

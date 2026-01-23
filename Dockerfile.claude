@@ -1,52 +1,19 @@
-# Claude Worker Docker Image
-# Container with Claude CLI for running Claude Code sessions
-#
-# Requires: ANTHROPIC_API_KEY environment variable
-
 FROM node:20-alpine
 
-WORKDIR /workspace
+# Install essential tools + Claude CLI
+RUN apk add --no-cache git curl jq bash tmux openssh-client && \
+    npm install -g @anthropic-ai/claude-code
 
-# Install essential tools
-RUN apk add --no-cache \
-    git \
-    curl \
-    jq \
-    bash \
-    tmux \
-    openssh-client \
-    && rm -rf /var/cache/apk/*
-
-# Install Claude CLI globally
-RUN npm install -g @anthropic-ai/claude-code
-
-# Create directories for Claude config and vibecraft hooks
+# Create directories
 RUN mkdir -p /root/.claude /root/.vibecraft/data /root/.vibecraft/hooks
 
-# Copy vibecraft hooks (will be mounted or copied from host)
+# Copy hooks
 COPY hooks/vibecraft-hook.sh /root/.vibecraft/hooks/
+COPY hooks/bin/ /root/.vibecraft/hooks/bin/
 
-# Configure Claude to use vibecraft hooks
-# This creates the settings file that points to our hook
-RUN echo '{\
-  "hooks": {\
-    "PreToolUse": [{"type": "command", "command": "/root/.vibecraft/hooks/vibecraft-hook.sh"}],\
-    "PostToolUse": [{"type": "command", "command": "/root/.vibecraft/hooks/vibecraft-hook.sh"}],\
-    "Stop": [{"type": "command", "command": "/root/.vibecraft/hooks/vibecraft-hook.sh"}],\
-    "UserPromptSubmit": [{"type": "command", "command": "/root/.vibecraft/hooks/vibecraft-hook.sh"}],\
-    "Notification": [{"type": "command", "command": "/root/.vibecraft/hooks/vibecraft-hook.sh"}]\
-  }\
-}' > /root/.claude/settings.json
-
-# Environment defaults
-ENV NODE_ENV=production
+# Environment
 ENV VIBECRAFT_DATA_DIR=/root/.vibecraft/data
-# Hook uses VIBECRAFT_WS_NOTIFY for the notification URL
 ENV VIBECRAFT_WS_NOTIFY=http://vibecraft-hub:4003/event
-ENV VIBECRAFT_ENABLE_WS_NOTIFY=true
 
-# Default workspace
-WORKDIR /workspace
-
-# Keep container running (Claude sessions started via exec)
-CMD ["tail", "-f", "/dev/null"]
+# Start tmux server on container start
+CMD ["sh", "-c", "tmux start-server && tail -f /dev/null"]

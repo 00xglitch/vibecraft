@@ -334,6 +334,15 @@
   color: #93c5fd;
 }
 
+/* Docker badge (containerized sessions) */
+.session-badge.docker {
+  background: rgba(33, 150, 243, 0.2);
+  border: 1px solid rgba(33, 150, 243, 0.3);
+  color: #60a5fa;
+  font-size: 12px;
+  padding: 0 3px;
+}
+
 /* Double Shot Latte badge (auto-continue active) */
 .session-badge.dsl {
   background: rgba(180, 83, 9, 0.35);

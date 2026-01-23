@@ -448,6 +448,14 @@ export interface CreateSessionRequest {
     model?: string // --model (sonnet, opus, haiku)
     thinking?: boolean // --thinking (extended thinking mode)
   }
+  /** Runtime environment: 'tmux' (local) or 'docker' (container) */
+  runtime?: SessionRuntime
+  /** Docker-specific options (only used when runtime='docker') */
+  docker?: {
+    workspace?: string // Host path to mount (defaults to cwd)
+    memory?: string // Memory limit (e.g., "1G", "512M")
+    network?: string // Docker network (default: vibecraft-net)
+  }
 }
 
 /** Request to create an implicit session (external Claude, no tmux control) */

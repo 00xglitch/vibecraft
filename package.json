@@ -57,7 +57,9 @@
   "dependencies": {
     "@deepgram/sdk": "^4.11.3",
     "@opencode-ai/sdk": "^1.1.27",
+    "@types/dockerode": "^4.0.1",
     "chokidar": "^4.0.0",
+    "dockerode": "^4.0.9",
     "dotenv": "^17.2.3",
     "three": "^0.170.0",
     "tone": "^15.1.22",

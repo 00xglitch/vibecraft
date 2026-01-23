@@ -85,6 +85,7 @@ import {
   getHostWorkspaces,
   type EnvironmentInfo,
 } from './environment.js'
+import { DockerSessionManager } from './DockerSessionManager.js'
 import {
   toDisplayPath,
   toExecutionPath,
@@ -521,6 +522,9 @@ const gitStatusManager = new GitStatusManager()
 
 /** Project directories manager */
 const projectsManager = new ProjectsManager()
+
+/** Docker container session manager */
+const dockerSessionManager = new DockerSessionManager()
 
 /** File change tracker for rollback functionality */
 const changeTracker = new ChangeTracker({
@@ -1088,7 +1092,126 @@ function shortId(): string {
 /**
  * Create a new managed session
  */
+/**
+ * Create a new Claude session (routes to tmux or Docker based on runtime)
+ */
 async function createSession(options: CreateSessionRequest = {}): Promise<ManagedSession> {
+  const runtime = options.runtime || 'tmux' // Default to tmux for backward compatibility
+
+  if (runtime === 'docker') {
+    return createDockerSession(options)
+  } else {
+    return createTmuxSession(options)
+  }
+}
+
+/**
+ * Create a Docker container session
+ */
+async function createDockerSession(options: CreateSessionRequest): Promise<ManagedSession> {
+  const id = randomUUID()
+  sessionCounter++
+  const tmuxSession = `vibecraft-${shortId()}`
+
+  // Workspace defaults to cwd or current directory
+  const workspace = options.docker?.workspace || options.cwd || process.cwd()
+
+  // Validate API key
+  const apiKey = process.env.ANTHROPIC_API_KEY
+  if (!apiKey) {
+    throw new Error('ANTHROPIC_API_KEY required for Docker sessions')
+  }
+
+  // Detect project name
+  let projectInfo: Awaited<ReturnType<typeof detectProjectName>> | null = null
+  try {
+    projectInfo = await detectProjectName(workspace)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    log(`Error detecting project name for workspace "${workspace}": ${message}`)
+  }
+
+  const name = options.name || projectInfo?.name || `Claude ${sessionCounter}`
+
+  // Build Claude args
+  const flags = options.flags || {}
+  const claudeArgs: string[] = []
+
+  if (flags.continue !== false) {
+    claudeArgs.push('-c')
+  }
+  if (flags.skipPermissions !== false) {
+    claudeArgs.push('--permission-mode=bypassPermissions')
+    claudeArgs.push('--dangerously-skip-permissions')
+  }
+  if (flags.chrome) {
+    claudeArgs.push('--chrome')
+  }
+  if (flags.model) {
+    claudeArgs.push('--model', flags.model)
+  }
+  if (flags.thinking) {
+    claudeArgs.push('--thinking')
+  }
+
+  // Create container
+  const containerId = await dockerSessionManager.createSessionContainer(
+    { id, name } as ManagedSession,
+    {
+      workspace,
+      apiKey,
+      memory: options.docker?.memory,
+      network: options.docker?.network,
+    }
+  )
+
+  // Start Claude inside container
+  await dockerSessionManager.startClaudeInContainer(id, tmuxSession, claudeCommand, claudeArgs)
+
+  const env = getEnvironment()
+  const session: ManagedSession = {
+    id,
+    name,
+    sessionType: 'claude',
+    tmuxSession,
+    status: 'idle',
+    createdAt: Date.now(),
+    lastActivity: Date.now(),
+    cwd: workspace,
+    runtime: 'docker',
+    containerId,
+    environment: {
+      type: 'docker',
+      isDocker: true,
+      isWSL: env.isWSL,
+    },
+    projectName: projectInfo?.name,
+    projectSource: projectInfo?.source,
+  }
+
+  managedSessions.set(id, session)
+  tmuxToManagedMap.set(tmuxSession, id)
+
+  log(
+    `Created Docker session: ${session.name} (${id.slice(0, 8)}) -> container:${containerId.slice(0, 12)}`
+  )
+
+  // Track git status if applicable
+  if (workspace) {
+    gitStatusManager.track(id, workspace)
+    projectsManager.addProject(workspace, name)
+  }
+
+  broadcastSessions()
+  saveSessions()
+
+  return session
+}
+
+/**
+ * Create a tmux session (local)
+ */
+async function createTmuxSession(options: CreateSessionRequest = {}): Promise<ManagedSession> {
   const id = randomUUID()
   sessionCounter++
   const tmuxSession = `vibecraft-${shortId()}`
@@ -1552,6 +1675,22 @@ function checkSessionHealth(): void {
 
   if (claudeSessions.length === 0) return
 
+  // Split sessions by runtime
+  const tmuxSessions = claudeSessions.filter((s) => s.runtime !== 'docker')
+  const dockerSessions = claudeSessions.filter((s) => s.runtime === 'docker')
+
+  // Check tmux sessions
+  if (tmuxSessions.length > 0) {
+    checkTmuxSessionHealth(tmuxSessions)
+  }
+
+  // Check Docker sessions
+  if (dockerSessions.length > 0) {
+    checkDockerSessionHealth(dockerSessions)
+  }
+}
+
+function checkTmuxSessionHealth(sessions: ManagedSession[]): void {
   // Get detailed pane info: session name, current command, and PID
   exec(
     'tmux list-panes -a -F "#{session_name}|#{pane_current_command}|#{pane_pid}"',
@@ -1559,7 +1698,7 @@ function checkSessionHealth(): void {
     (error, stdout) => {
       if (error) {
         // tmux might not be running - mark non-implicit Claude sessions as offline
-        for (const session of claudeSessions) {
+        for (const session of sessions) {
           // Skip implicit sessions - they don't have tmux, so can't be "offline" in that sense
           if (isImplicitSession(session)) continue
           if (session.status !== 'offline') {
@@ -1580,7 +1719,7 @@ function checkSessionHealth(): void {
 
       let changed = false
 
-      for (const session of claudeSessions) {
+      for (const session of sessions) {
         // Skip implicit sessions - they don't have tmux to check
         if (isImplicitSession(session)) continue
 
@@ -1627,6 +1766,65 @@ function checkSessionHealth(): void {
       }
     }
   )
+}
+
+async function checkDockerSessionHealth(sessions: ManagedSession[]): Promise<void> {
+  let changed = false
+
+  for (const session of sessions) {
+    if (!session.containerId) continue
+
+    const isRunning = await dockerSessionManager.isContainerRunning(session.id)
+
+    if (!isRunning && session.status !== 'offline') {
+      session.status = 'offline'
+      log(`Docker session "${session.name}" went offline (container stopped)`)
+      changed = true
+    } else if (isRunning && session.status === 'offline') {
+      // Container running but session offline - check tmux inside
+      const hasActiveTmux = await checkTmuxInContainer(session)
+      if (hasActiveTmux) {
+        session.status = 'idle'
+        log(`Docker session "${session.name}" came back online`)
+        changed = true
+      }
+    }
+  }
+
+  if (changed) {
+    broadcastSessions()
+    saveSessions()
+  }
+}
+
+async function checkTmuxInContainer(session: ManagedSession): Promise<boolean> {
+  try {
+    const containerId = session.containerId
+    if (!containerId) return false
+
+    const container = dockerSessionManager.dockerClient.getContainer(containerId)
+    const exec = await container.exec({
+      Cmd: ['tmux', 'list-sessions'],
+      AttachStdout: true,
+      AttachStderr: true,
+    })
+
+    const stream = await exec.start({ Detach: false })
+    const output = await streamToString(stream)
+
+    return output.includes(session.tmuxSession || '')
+  } catch {
+    return false
+  }
+}
+
+function streamToString(stream: NodeJS.ReadableStream): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = []
+    stream.on('data', (chunk: Buffer) => chunks.push(chunk))
+    stream.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
+    stream.on('error', reject)
+  })
 }
 
 /**
@@ -4408,6 +4606,14 @@ async function main() {
   // Load saved sessions (for persistence across restarts)
   await loadSessions()
 
+  // Cleanup orphaned Docker containers
+  try {
+    await dockerSessionManager.cleanupOrphanedContainers()
+    log('Docker cleanup completed')
+  } catch (err) {
+    log(`Warning: Docker cleanup failed - ${err}`)
+  }
+
   // Load saved config (CLI command, etc.)
   loadConfig()
 
@@ -4601,3 +4807,39 @@ async function main() {
 }
 
 main()
+
+// Cleanup on process exit
+process.on('SIGINT', async () => {
+  log('Shutting down...')
+
+  // Stop all Docker sessions
+  for (const session of managedSessions.values()) {
+    if (session.runtime === 'docker') {
+      try {
+        await dockerSessionManager.stopContainer(session.id)
+        log(`Stopped Docker container for session "${session.name}"`)
+      } catch (err) {
+        log(`Error stopping container for ${session.name}: ${err}`)
+      }
+    }
+  }
+
+  process.exit(0)
+})
+
+process.on('SIGTERM', async () => {
+  log('Received SIGTERM, shutting down gracefully...')
+
+  // Stop all Docker sessions
+  for (const session of managedSessions.values()) {
+    if (session.runtime === 'docker') {
+      try {
+        await dockerSessionManager.stopContainer(session.id)
+      } catch (err) {
+        log(`Error stopping container for ${session.name}: ${err}`)
+      }
+    }
+  }
+
+  process.exit(0)
+})

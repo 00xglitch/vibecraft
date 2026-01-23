@@ -22,6 +22,14 @@ export interface SessionFlags {
   thinking?: boolean // Enable extended thinking mode
 }
 
+export interface DockerOptions {
+  workspace?: string
+  memory?: string
+  network?: string
+}
+
+export type SessionRuntime = 'tmux' | 'docker'
+
 export interface NewSessionModal {
   switchSessionType(type: 'claude' | 'opencode'): void
   sessionType: 'claude' | 'opencode'
@@ -35,7 +43,13 @@ export interface NewSessionModal {
 export function setupNewSessionModal(
   container: HTMLElement,
   callbacks: {
-    onClaudeSession: (name: string, cwd: string, flags: SessionFlags) => void
+    onClaudeSession: (
+      name: string,
+      cwd: string,
+      flags: SessionFlags,
+      runtime?: SessionRuntime,
+      docker?: DockerOptions
+    ) => void
     onOpenCodeSession: (data: {
       name?: string
       cwd?: string
@@ -221,8 +235,28 @@ export function setupNewSessionModal(
         model: modelSelect?.value || undefined,
       }
 
+      // Read runtime selector
+      const runtimeRadios = document.querySelectorAll<HTMLInputElement>('input[name="runtime"]')
+      let runtime: SessionRuntime = 'tmux'
+      for (const radio of runtimeRadios) {
+        if (radio.checked) {
+          runtime = radio.value as SessionRuntime
+          break
+        }
+      }
+
+      // Read Docker options if Docker runtime selected
+      let dockerOptions: DockerOptions | undefined
+      if (runtime === 'docker') {
+        const memorySelect = document.getElementById('session-opt-memory') as HTMLSelectElement
+        dockerOptions = {
+          workspace: cwd || undefined,
+          memory: memorySelect?.value || '1G',
+        }
+      }
+
       // Create Claude session
-      callbacks.onClaudeSession(name || '', cwd || '', flags)
+      callbacks.onClaudeSession(name || '', cwd || '', flags, runtime, dockerOptions)
     }
   }
 
@@ -241,6 +275,17 @@ export function setupNewSessionModal(
   opencodeTab?.addEventListener('click', () => switchSessionType('opencode'))
   cancelBtn?.addEventListener('click', handleCancel)
   createBtn?.addEventListener('click', handleCreate)
+
+  // Toggle docker options visibility based on runtime selection
+  const runtimeRadios = document.querySelectorAll<HTMLInputElement>('input[name="runtime"]')
+  const dockerOptionsDiv = document.getElementById('docker-options')
+  runtimeRadios.forEach((radio) => {
+    radio.addEventListener('change', () => {
+      if (dockerOptionsDiv) {
+        dockerOptionsDiv.style.display = radio.value === 'docker' ? 'block' : 'none'
+      }
+    })
+  })
 
   // Setup directory autocomplete
   if (cwdInput) {

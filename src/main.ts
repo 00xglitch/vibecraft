@@ -477,6 +477,12 @@ function renderManagedSessions(): void {
       ? `<span class="session-badge dsl" title="Double Shot Latte: Auto-continuing (${session.doubleShotContinues || 1}x)">☕</span>`
       : ''
 
+    // Docker badge (for containerized sessions)
+    const dockerBadge =
+      session.runtime === 'docker'
+        ? `<span class="session-badge docker" title="Docker container">🐳</span>`
+        : ''
+
     el.innerHTML = `
       ${hotkey ? `<div class="session-hotkey">${hotkey}</div>` : ''}
       <div class="session-status ${statusClass}"></div>
@@ -484,6 +490,7 @@ function renderManagedSessions(): void {
         <div class="session-name">
           ${pinnedIndicator}${escapeHtml(session.name)}
           ${dslBadge}
+          ${dockerBadge}
           ${isImplicit ? '<span class="session-badge external" title="External Claude session (no tmux control)">ext</span>' : ''}
         </div>
         <div class="${detailClass}">${detail}${!needsAttention && session.status !== 'offline' && lastActive ? ` · ${lastActive}` : ''}</div>
@@ -616,9 +623,11 @@ async function createManagedSession(
   cwd?: string,
   flags?: SessionFlags,
   hintPosition?: { x: number; z: number },
-  pendingZoneId?: string
+  pendingZoneId?: string,
+  runtime?: import('./api/SessionAPI').SessionRuntime,
+  docker?: import('./api/SessionAPI').DockerOptions
 ): Promise<void> {
-  const data = await sessionAPI.createSession(name, cwd, flags)
+  const data = await sessionAPI.createSession(name, cwd, flags, runtime, docker)
 
   if (!data.ok) {
     console.error('Failed to create session:', data.error)
@@ -895,8 +904,16 @@ function setupManagedSessions(): void {
   const opencodeModelField = document.getElementById('opencode-model-field')
 
   const opencodeState = setupNewSessionModal(modal!, {
-    onClaudeSession: (name, cwd, flags) => {
-      createManagedSession(name, cwd, flags, currentModalHint ?? undefined, `pending-${Date.now()}`)
+    onClaudeSession: (name, cwd, flags, runtime, docker) => {
+      createManagedSession(
+        name,
+        cwd,
+        flags,
+        currentModalHint ?? undefined,
+        `pending-${Date.now()}`,
+        runtime,
+        docker
+      )
       closeModal()
     },
     onOpenCodeSession: async (data) => {
