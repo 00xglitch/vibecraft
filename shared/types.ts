@@ -357,6 +357,10 @@ export interface ManagedSession {
   sortOrder?: number
   /** Whether session is archived (hidden by default) */
   archived?: boolean
+  /** Double Shot Latte: auto-continue is active (stop events being evaluated) */
+  doubleShotActive?: boolean
+  /** Double Shot Latte: count of auto-continues in current burst */
+  doubleShotContinues?: number
 }
 
 /** Git repository status */

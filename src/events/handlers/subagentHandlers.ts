@@ -13,7 +13,7 @@
 import { eventBus } from '../EventBus'
 import { soundManager } from '../../audio'
 import type { PreToolUseEvent, PostToolUseEvent } from '../../../shared/types'
-import type { SubagentRole } from '../../entities/SubagentManager'
+import type { SubagentRole, SpawnOptions } from '../../entities/SubagentManager'
 
 /**
  * Map subagent_type strings to SubagentRole
@@ -84,9 +84,18 @@ export function registerSubagentHandlers(): void {
     const description = input.description || input.prompt
     const role = parseSubagentRole(input.subagent_type)
 
-    // Spawn subagent with hierarchy support
+    // Build spawn options from zone context (if available)
+    const spawnOptions: SpawnOptions = {}
+    if (ctx.session.zone) {
+      const zone = ctx.session.zone
+      spawnOptions.zoneColor = zone.color
+      spawnOptions.zonePosition = { x: zone.position.x, z: zone.position.z }
+      spawnOptions.zoneElevation = zone.elevation ?? 0
+    }
+
+    // Spawn subagent with hierarchy support and zone context
     // Parent is automatically determined from the active tool chain
-    ctx.session.subagents.spawn(event.toolUseId, description, role)
+    ctx.session.subagents.spawn(event.toolUseId, description, role, undefined, spawnOptions)
     ctx.session.stats.activeSubagents = ctx.session.subagents.count
 
     // Play spawn sound

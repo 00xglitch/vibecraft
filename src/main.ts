@@ -68,6 +68,8 @@ import { createSessionAPI, type SessionAPI } from './api'
 import { replayController, ReplaySceneManager, type SceneSnapshot } from './replay'
 import { setupReplayControls, type ReplayControls } from './ui/ReplayControls'
 import { initializePlugins, pluginManager } from './plugins'
+import { achievementSystem } from './systems/AchievementSystem'
+import { showAchievementsModal, initAchievementNotifications } from './ui/AchievementsModal'
 
 // ============================================================================
 // Configuration
@@ -444,6 +446,9 @@ function renderManagedSessions(): void {
     const tooltipParts = [
       `Name: ${session.name}`,
       `Status: ${session.status}`,
+      session.doubleShotActive
+        ? `☕ Double Shot Latte: Auto-continuing (${session.doubleShotContinues || 1}x)`
+        : '',
       session.implicit ? '🔗 External Claude (no tmux control)' : `tmux: ${session.tmuxSession}`,
       session.claudeSessionId
         ? `Claude ID: ${session.claudeSessionId.slice(0, 12)}...`
@@ -460,12 +465,18 @@ function renderManagedSessions(): void {
     // Build pinned indicator
     const pinnedIndicator = session.pinned ? '<span class="session-pin-indicator">📌</span>' : ''
 
+    // Double Shot Latte badge (auto-continue active)
+    const dslBadge = session.doubleShotActive
+      ? `<span class="session-badge dsl" title="Double Shot Latte: Auto-continuing (${session.doubleShotContinues || 1}x)">☕</span>`
+      : ''
+
     el.innerHTML = `
       ${hotkey ? `<div class="session-hotkey">${hotkey}</div>` : ''}
       <div class="session-status ${statusClass}"></div>
       <div class="session-info">
         <div class="session-name">
           ${pinnedIndicator}${escapeHtml(session.name)}
+          ${dslBadge}
           ${isImplicit ? '<span class="session-badge external" title="External Claude session (no tmux control)">ext</span>' : ''}
         </div>
         <div class="${detailClass}">${detail}${!needsAttention && session.status !== 'offline' && lastActive ? ` · ${lastActive}` : ''}</div>
@@ -1829,6 +1840,9 @@ function getOrCreateSession(sessionId: string, eventCwd?: string): SessionState 
     soundManager.play('zone_create', { zoneId: sessionId })
   }
 
+  // Track active zones for achievements
+  achievementSystem.trackActiveZones(state.sessions.size)
+
   if (linkedManagedSession) {
     // Update the zone label with the managed session name and keybind
     // Use projectName for display, branch from gitStatus
@@ -2372,6 +2386,11 @@ function handleEvent(event: ClaudeEvent, isHistory = false) {
       // [Sound, character movement, context text handled by EventBus]
       // [Thinking indicator handled by EventBus: feedHandlers.ts]
 
+      // Track tool use for achievements (skip during history replay)
+      if (!isHistory) {
+        achievementSystem.trackToolUse(e.tool)
+      }
+
       // Update stats after subagent spawn (EventBus handles spawn itself)
       if (e.tool === 'Task') {
         updateStats()
@@ -2462,6 +2481,10 @@ function handleEvent(event: ClaudeEvent, isHistory = false) {
       session.stats.filesTouched.clear()
       updateStats()
       updateActivity('Session started')
+      // Track session for achievements (skip during history replay)
+      if (!isHistory) {
+        achievementSystem.trackSessionCreated()
+      }
       break
 
     case 'notification':
@@ -3179,6 +3202,9 @@ function setupSettingsModal(): void {
   characterSelect?.addEventListener('change', () => {
     localStorage.setItem('vibecraft-character', characterSelect.value)
 
+    // Track character selection for achievements
+    achievementSystem.trackCharacterSelected(characterSelect.value)
+
     // Swap all existing characters to the new type
     if (state.scene) {
       for (const [sessionId, session] of state.sessions) {
@@ -3389,6 +3415,388 @@ function hideNotConnectedOverlay(): void {
 }
 
 // ============================================================================
+// Achievements
+// ============================================================================
+
+function setupAchievementsButton(): void {
+  // Create achievements button in the unified HUD (next to settings, plugins, help buttons)
+  const hudButtons = document.querySelector('.unified-hud')
+  if (!hudButtons) {
+    console.warn('Could not find .unified-hud for achievements button')
+    return
+  }
+
+  const btn = createAchievementsButton()
+
+  // Insert before the settings button
+  const settingsBtn = document.getElementById('settings-btn')
+  if (settingsBtn) {
+    hudButtons.insertBefore(btn, settingsBtn)
+  } else {
+    hudButtons.appendChild(btn)
+  }
+}
+
+function createAchievementsButton(): HTMLButtonElement {
+  const btn = document.createElement('button')
+  btn.className = 'hud-btn achievements-btn'
+  btn.id = 'achievements-btn'
+  btn.innerHTML = `🏆 <span class="points-badge">${achievementSystem.getTotalPoints()}</span>`
+  btn.title = 'Achievements'
+  btn.addEventListener('click', () => {
+    console.log('[Achievements] Button clicked, showing modal')
+    showAchievementsModal()
+  })
+
+  // Update points badge when achievements unlock
+  achievementSystem.onUnlock(() => {
+    const badge = btn.querySelector('.points-badge')
+    if (badge) {
+      badge.textContent = achievementSystem.getTotalPoints().toString()
+    }
+  })
+
+  return btn
+}
+
+// ============================================================================
+// Plugins Button
+// ============================================================================
+
+function setupPluginsButton(): void {
+  const pluginsBtn = document.getElementById('plugins-btn')
+  const modal = document.getElementById('plugins-modal')
+  const closeBtn = document.getElementById('plugins-close')
+  const refreshBtn = document.getElementById('plugins-refresh')
+
+  if (!pluginsBtn || !modal) return
+
+  // Show modal on click
+  pluginsBtn.addEventListener('click', () => {
+    modal.classList.add('visible')
+    updateMcpServersList()
+  })
+
+  // Close button
+  closeBtn?.addEventListener('click', () => {
+    modal.classList.remove('visible')
+  })
+
+  // Close on backdrop click
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) modal.classList.remove('visible')
+  })
+
+  // Refresh button
+  refreshBtn?.addEventListener('click', () => {
+    updateMcpServersList()
+  })
+
+  // Tab switching
+  const tabs = modal.querySelectorAll('.plugins-tab')
+  tabs.forEach((tab) => {
+    tab.addEventListener('click', () => {
+      const tabName = tab.getAttribute('data-tab')
+      if (!tabName) return
+
+      // Update active tab
+      tabs.forEach((t) => t.classList.remove('active'))
+      tab.classList.add('active')
+
+      // Show corresponding content
+      modal.querySelectorAll('.plugins-tab-content').forEach((content) => {
+        content.classList.add('hidden')
+      })
+      const targetContent = document.getElementById(`plugins-tab-${tabName}`)
+      targetContent?.classList.remove('hidden')
+    })
+  })
+}
+
+// Update MCP servers list in the modal
+function updateMcpServersList(): void {
+  const listEl = document.getElementById('mcp-servers-list')
+  const countEl = document.getElementById('mcp-count')
+  if (!listEl) return
+
+  // Get MCP servers from the registry (if available)
+  const mcpRegistry = (
+    window as unknown as { mcpRegistry?: Map<string, { tools: string[]; lastSeen: number }> }
+  ).mcpRegistry
+
+  if (!mcpRegistry || mcpRegistry.size === 0) {
+    listEl.innerHTML =
+      '<div class="plugins-empty">No MCP servers detected yet. They appear as Claude uses MCP tools.</div>'
+    if (countEl) countEl.textContent = '0'
+    return
+  }
+
+  // Build list of MCP servers
+  let html = ''
+  mcpRegistry.forEach((server, name) => {
+    const toolCount = server.tools.length
+    const lastSeenAgo = Math.floor((Date.now() - server.lastSeen) / 1000)
+    const lastSeenText = lastSeenAgo < 60 ? 'just now' : `${Math.floor(lastSeenAgo / 60)}m ago`
+
+    html += `
+      <div class="plugin-modal-item">
+        <div class="plugin-modal-icon">🔧</div>
+        <div class="plugin-modal-info">
+          <div class="plugin-modal-name">${escapeHtml(name)}</div>
+          <div class="plugin-modal-tools">${toolCount} tool${toolCount !== 1 ? 's' : ''} • Last used ${lastSeenText}</div>
+        </div>
+        <span class="plugin-modal-status active">Active</span>
+      </div>
+    `
+  })
+
+  listEl.innerHTML = html
+  if (countEl) countEl.textContent = String(mcpRegistry.size)
+}
+
+// Helper to escape HTML
+function escapeHtml(text: string): string {
+  const div = document.createElement('div')
+  div.textContent = text
+  return div.innerHTML
+}
+
+// ============================================================================
+// Help Button
+// ============================================================================
+
+function setupHelpButton(): void {
+  const helpBtn = document.getElementById('help-btn')
+  if (!helpBtn) return
+
+  helpBtn.addEventListener('click', showHelpModal)
+}
+
+function showHelpModal(): void {
+  // Check if modal already exists
+  let modal = document.getElementById('help-modal')
+  if (modal) {
+    modal.classList.add('visible')
+    return
+  }
+
+  // Create modal using safe DOM methods
+  modal = document.createElement('div')
+  modal.id = 'help-modal'
+  modal.className = 'modal'
+
+  const content = document.createElement('div')
+  content.className = 'modal-content help-modal-content'
+
+  const header = document.createElement('div')
+  header.className = 'modal-header'
+
+  const title = document.createElement('h3')
+  title.textContent = '❓ Keyboard Shortcuts'
+  header.appendChild(title)
+
+  const closeBtn = document.createElement('button')
+  closeBtn.type = 'button'
+  closeBtn.className = 'modal-close-btn'
+  closeBtn.textContent = '×'
+  closeBtn.addEventListener('click', () => modal?.classList.remove('visible'))
+  header.appendChild(closeBtn)
+
+  content.appendChild(header)
+
+  // Help content
+  const helpContent = document.createElement('div')
+  helpContent.className = 'help-content'
+
+  const shortcuts: Array<{ section: string; items: Array<{ keys: string; desc: string }> }> = [
+    {
+      section: 'Navigation',
+      items: [
+        { keys: '1-6', desc: 'Switch to session 1-6' },
+        { keys: 'Tab', desc: 'Toggle Workshop / Feed focus' },
+        { keys: 'Esc', desc: 'Toggle focus / close modal' },
+        { keys: '` or 0', desc: 'Overview (all sessions)' },
+        { keys: 'Alt+N', desc: 'New session' },
+        { keys: 'Alt+A', desc: 'Next session needing attention' },
+      ],
+    },
+    {
+      section: 'Tools & Features',
+      items: [
+        { keys: 'D', desc: 'Toggle draw mode' },
+        { keys: 'P', desc: 'Toggle station panels' },
+        { keys: 'F', desc: 'Toggle follow-active mode' },
+        { keys: 'Alt+D', desc: 'Toggle dev panel' },
+        { keys: 'Alt+R', desc: 'Toggle voice recording' },
+        { keys: 'Alt+Space', desc: 'Expand recent "show more"' },
+      ],
+    },
+    {
+      section: 'Draw Mode',
+      items: [
+        { keys: '1-6', desc: 'Select color' },
+        { keys: '0', desc: 'Eraser' },
+        { keys: 'Q/E', desc: 'Brush size -/+' },
+        { keys: 'R', desc: 'Toggle 3D stacking' },
+        { keys: 'X', desc: 'Clear all hexes' },
+      ],
+    },
+    {
+      section: 'Session Actions',
+      items: [
+        { keys: 'Ctrl+C', desc: 'Copy / Interrupt session' },
+        { keys: 'Right-click zone', desc: 'Zone info / commands' },
+        { keys: 'Click empty floor', desc: 'Create new session' },
+      ],
+    },
+  ]
+
+  for (const section of shortcuts) {
+    const sectionDiv = document.createElement('div')
+    sectionDiv.className = 'help-section'
+
+    const sectionTitle = document.createElement('h4')
+    sectionTitle.textContent = section.section
+    sectionDiv.appendChild(sectionTitle)
+
+    const shortcutsDiv = document.createElement('div')
+    shortcutsDiv.className = 'help-shortcuts'
+
+    for (const item of section.items) {
+      const shortcut = document.createElement('div')
+      shortcut.className = 'help-shortcut'
+
+      const kbd = document.createElement('kbd')
+      kbd.textContent = item.keys
+      shortcut.appendChild(kbd)
+
+      const desc = document.createElement('span')
+      desc.textContent = item.desc
+      shortcut.appendChild(desc)
+
+      shortcutsDiv.appendChild(shortcut)
+    }
+
+    sectionDiv.appendChild(shortcutsDiv)
+    helpContent.appendChild(sectionDiv)
+  }
+
+  content.appendChild(helpContent)
+  modal.appendChild(content)
+
+  // Close on backdrop click
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) modal.classList.remove('visible')
+  })
+
+  // Add CSS if not already added
+  if (!document.getElementById('help-modal-styles')) {
+    const style = document.createElement('style')
+    style.id = 'help-modal-styles'
+    style.textContent = `
+      #help-modal {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.75);
+        backdrop-filter: blur(4px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+        opacity: 0;
+        visibility: hidden;
+        transition: opacity 0.2s, visibility 0.2s;
+      }
+      #help-modal.visible {
+        opacity: 1;
+        visibility: visible;
+      }
+      .help-modal-content {
+        width: 500px;
+        max-width: 90vw;
+        max-height: 80vh;
+        overflow-y: auto;
+        background: rgba(15, 23, 42, 0.98);
+        border: 1px solid rgba(100, 116, 139, 0.3);
+        border-radius: 12px;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+      }
+      .help-content {
+        padding: 16px;
+      }
+      .help-section {
+        margin-bottom: 16px;
+      }
+      .help-section:last-child {
+        margin-bottom: 0;
+      }
+      .help-section h4 {
+        font-size: 12px;
+        font-weight: 600;
+        color: #a78bfa;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 8px;
+        padding-bottom: 4px;
+        border-bottom: 1px solid rgba(100, 116, 139, 0.2);
+      }
+      .help-shortcuts {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .help-shortcut {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-size: 12px;
+        color: #94a3b8;
+        padding: 4px 0;
+      }
+      .help-shortcut kbd {
+        display: inline-block;
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 4px;
+        padding: 2px 6px;
+        font-family: monospace;
+        font-size: 11px;
+        color: #fff;
+        min-width: 24px;
+        text-align: center;
+      }
+      .modal-close-btn {
+        background: rgba(239, 68, 68, 0.1);
+        border: 1px solid rgba(239, 68, 68, 0.3);
+        border-radius: 6px;
+        width: 28px;
+        height: 28px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 18px;
+        color: #ef4444;
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
+      .modal-close-btn:hover {
+        background: rgba(239, 68, 68, 0.2);
+        border-color: rgba(239, 68, 68, 0.5);
+      }
+    `
+    document.head.appendChild(style)
+  }
+
+  document.body.appendChild(modal)
+
+  // Show after adding to DOM
+  requestAnimationFrame(() => modal.classList.add('visible'))
+}
+
+// ============================================================================
 // Initialization
 // ============================================================================
 
@@ -3453,6 +3861,14 @@ function init() {
   state.attentionSystem = new AttentionSystem({
     onQueueChange: () => renderManagedSessions(),
   })
+
+  // Make attention badge clickable
+  const attentionBadge = document.getElementById('attention-badge')
+  if (attentionBadge) {
+    attentionBadge.style.cursor = 'pointer'
+    attentionBadge.title = 'Go to next session needing attention (Alt+A)'
+    attentionBadge.addEventListener('click', goToNextAttention)
+  }
 
   // Initialize timeline manager
   state.timelineManager = new TimelineManager()
@@ -3579,6 +3995,11 @@ function init() {
 
   // Handle token updates
   state.client.onTokens((data) => {
+    // Track tokens for achievements
+    if (data.current > 0) {
+      achievementSystem.trackTokens(data.current)
+    }
+
     // Update feed panel stat
     const tokensEl = document.getElementById('stat-tokens')
     if (tokensEl) {
@@ -4117,6 +4538,24 @@ function init() {
 
   // Check for updates (non-blocking)
   checkForUpdates()
+
+  // Initialize achievement notifications
+  initAchievementNotifications()
+
+  // Set up achievements button in header
+  setupAchievementsButton()
+
+  // Set up plugins and help buttons
+  setupPluginsButton()
+  setupHelpButton()
+
+  // Hide loading screen
+  const loader = document.getElementById('app-loader')
+  if (loader) {
+    loader.classList.add('hidden')
+    // Remove from DOM after transition
+    setTimeout(() => loader.remove(), 500)
+  }
 
   console.log('Vibecraft initialized (multi-session enabled)')
 }

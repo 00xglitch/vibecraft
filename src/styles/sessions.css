@@ -21,6 +21,16 @@
   animation: attention-badge-pulse 1.5s ease-in-out infinite;
   text-transform: none;
   letter-spacing: 0;
+  cursor: pointer;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.attention-badge:hover {
+  transform: scale(1.15) !important;
+  box-shadow: 0 0 12px rgba(251, 191, 36, 0.6);
+  animation-play-state: paused;
 }
 
 .attention-badge.hidden {
@@ -319,6 +329,28 @@
   background: rgba(147, 197, 253, 0.2);
   border: 1px solid rgba(147, 197, 253, 0.3);
   color: #93c5fd;
+}
+
+/* Double Shot Latte badge (auto-continue active) */
+.session-badge.dsl {
+  background: rgba(180, 83, 9, 0.35);
+  border: 1px solid rgba(217, 119, 6, 0.5);
+  color: #fbbf24;
+  font-size: 12px;
+  padding: 0 3px;
+  animation: dsl-steam 2s ease-in-out infinite;
+}
+
+@keyframes dsl-steam {
+  0%,
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  50% {
+    opacity: 0.85;
+    transform: translateY(-1px);
+  }
 }
 
 /* Token display */

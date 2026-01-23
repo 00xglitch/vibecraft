@@ -1,0 +1,32 @@
+# Vibecraft Development Docker Image
+# Hot reload enabled with tsx watch and Vite HMR
+
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Install pnpm and essential tools
+RUN npm install -g pnpm && \
+    apk add --no-cache git curl jq bash tmux
+
+# Copy package files
+COPY package.json pnpm-lock.yaml ./
+
+# Install ALL dependencies (including devDependencies for hot reload)
+RUN pnpm install --frozen-lockfile
+
+# Create data directory
+RUN mkdir -p /data
+
+# Environment defaults
+ENV NODE_ENV=development
+ENV VIBECRAFT_PORT=4003
+ENV VIBECRAFT_CLIENT_PORT=4002
+ENV VIBECRAFT_DATA_DIR=/data
+ENV VIBECRAFT_DEBUG=true
+
+# Expose ports
+EXPOSE 4003 4002
+
+# Run dev server (will be overridden by compose command)
+CMD ["npm", "run", "dev"]

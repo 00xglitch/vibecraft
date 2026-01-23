@@ -14,11 +14,7 @@ import * as THREE from 'three'
 import type { StationType } from '../../shared/types'
 import type { WorkshopScene } from '../scene/WorkshopScene'
 import type { ICharacter, CharacterOptions, CharacterState } from './ICharacter'
-import {
-  IdleBehaviorManager,
-  WorkingBehaviorManager,
-  type CharacterParts,
-} from './animations'
+import { IdleBehaviorManager, WorkingBehaviorManager, type CharacterParts } from './animations'
 
 export type MortyOptions = CharacterOptions
 
@@ -155,17 +151,11 @@ export class Morty implements ICharacter {
     group.add(rightEye)
 
     // Pupils (smaller, scared look)
-    const leftPupil = new THREE.Mesh(
-      new THREE.SphereGeometry(0.02, 8, 8),
-      pupilMaterial
-    )
+    const leftPupil = new THREE.Mesh(new THREE.SphereGeometry(0.02, 8, 8), pupilMaterial)
     leftPupil.position.set(-0.07, 0.03, 0.22)
     group.add(leftPupil)
 
-    const rightPupil = new THREE.Mesh(
-      new THREE.SphereGeometry(0.02, 8, 8),
-      pupilMaterial
-    )
+    const rightPupil = new THREE.Mesh(new THREE.SphereGeometry(0.02, 8, 8), pupilMaterial)
     rightPupil.position.set(0.07, 0.03, 0.22)
     group.add(rightPupil)
 
@@ -294,8 +284,7 @@ export class Morty implements ICharacter {
 
     // Movement
     if (this.targetPosition) {
-      const direction = new THREE.Vector3()
-        .subVectors(this.targetPosition, this.mesh.position)
+      const direction = new THREE.Vector3().subVectors(this.targetPosition, this.mesh.position)
       const distance = direction.length()
 
       if (distance > 0.1) {
@@ -394,6 +383,25 @@ export class Morty implements ICharacter {
         ringMaterial.color.setHex(0xa855f7)
         break
     }
+  }
+
+  public setStatusColor(color: number): void {
+    const ring = this.statusRing.material as THREE.MeshBasicMaterial
+    ring.color.setHex(color)
+  }
+
+  public playRandomIdleBehavior(): void {
+    if (this.state !== 'idle') {
+      this.setState('idle')
+    }
+    this.idleBehaviorManager.forcePlayRandom(this.getCharacterParts())
+  }
+
+  public playIdleBehavior(name: string): void {
+    if (this.state !== 'idle') {
+      this.setState('idle')
+    }
+    this.idleBehaviorManager.forcePlay(name, this.getCharacterParts())
   }
 
   public dispose(): void {

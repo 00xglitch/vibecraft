@@ -11,6 +11,7 @@ import { eventBus } from '../EventBus'
 import type { PostToolUseEvent, BashToolInput } from '../../../shared/types'
 import { showCommitAchievement, commitTracker } from '../../ui/AchievementToast'
 import { getConfettiSystem } from '../../effects'
+import { achievementSystem } from '../../systems/AchievementSystem'
 import * as THREE from 'three'
 
 // Store reference to confetti system and scene
@@ -90,6 +91,9 @@ export function registerCommitHandlers(): void {
     // Extract commit message
     const message = extractCommitMessage(input.command)
 
+    // Track for achievements
+    achievementSystem.trackGitCommit()
+
     // Increment commit count
     const commitNumber = commitTracker.increment(sessionId)
 
@@ -120,7 +124,9 @@ export function registerCommitHandlers(): void {
       }
     }
 
-    console.log(`[CommitHandlers] Commit #${commitNumber} celebrated for session ${sessionId.slice(0, 8)}`)
+    console.log(
+      `[CommitHandlers] Commit #${commitNumber} celebrated for session ${sessionId.slice(0, 8)}`
+    )
   })
 }
 

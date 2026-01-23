@@ -71,6 +71,39 @@ export class AfroSamurai implements ICharacter {
   private idleBehaviorManager: IdleBehaviorManager
   private workingBehaviorManager: WorkingBehaviorManager
 
+  // Speech bubble system (3D)
+  private speechBubble: THREE.Group | null = null
+  private speechTimeout: number | null = null
+
+  // Personality phrases for different situations
+  private static readonly PHRASES = {
+    idle: [
+      '⚔️ The path of code is long...',
+      "🧘 Patience is the warrior's virtue",
+      '💭 I sense a bug nearby...',
+      '🍵 Tea break? Nah, more coding!',
+      '⚡ My katana thirsts for bugs!',
+    ],
+    working: [
+      '🔥 Slicing through this code!',
+      '⚔️ One clean cut!',
+      '💪 Focus... breathe... code!',
+      '🎯 Target acquired!',
+    ],
+    thinking: [
+      '🤔 Hmm, let me meditate on this...',
+      '💭 The answer lies within...',
+      '🧠 Processing at samurai speed!',
+    ],
+    success: [
+      '✨ Another bug vanquished!',
+      '🎉 Victory is mine!',
+      '⚔️ Clean as a katana strike!',
+      '💯 Nailed it!',
+    ],
+    error: ['😤 This bug dishonors me!', "🤺 We'll meet again, bug...", '💀 A worthy opponent...'],
+  }
+
   constructor(scene: WorkshopScene, options: AfroSamuraiOptions = {}) {
     this.scene = scene
     this.options = { ...DEFAULT_OPTIONS, ...options }
@@ -129,45 +162,46 @@ export class AfroSamurai implements ICharacter {
   private createHead(): THREE.Group {
     const group = new THREE.Group()
 
-    // Neck (connects head to body)
-    const neckGeo = new THREE.CylinderGeometry(0.08, 0.1, 0.12, 8)
+    // Neck (connects head to body - extended to reach shoulders)
+    const neckGeo = new THREE.CylinderGeometry(0.08, 0.12, 0.25, 8)
     const skinMat = new THREE.MeshStandardMaterial({
       color: COLORS.skin,
       roughness: 0.8,
     })
     const neck = new THREE.Mesh(neckGeo, skinMat)
-    neck.position.y = -0.1
+    neck.position.y = -0.2
     group.add(neck)
 
-    // Face/Head (proper brown skin)
-    const faceGeo = new THREE.SphereGeometry(0.28, 16, 12)
+    // Face/Head (proper brown skin) - positioned forward of afro
+    const faceGeo = new THREE.SphereGeometry(0.26, 16, 12)
     const face = new THREE.Mesh(faceGeo, skinMat)
-    face.position.y = 0.15
-    face.scale.set(1, 1.1, 0.95) // Slightly elongated
+    face.position.y = 0.1
+    face.position.z = 0.15 // Push face forward out of afro
+    face.scale.set(1, 1.1, 0.9) // Slightly elongated, flatter in z
     group.add(face)
 
-    // Afro (large dark sphere with texture feel)
-    const afroGeo = new THREE.SphereGeometry(0.48, 24, 20)
+    // Afro (large dark sphere positioned behind face)
+    const afroGeo = new THREE.SphereGeometry(0.45, 24, 20)
     const afroMat = new THREE.MeshStandardMaterial({
       color: COLORS.afro,
       roughness: 1,
       metalness: 0,
     })
     const afro = new THREE.Mesh(afroGeo, afroMat)
-    afro.position.y = 0.32
-    afro.position.z = -0.08
+    afro.position.y = 0.28
+    afro.position.z = -0.15 // Push afro further back
     group.add(afro)
 
-    // Afro texture bumps (small spheres for volume)
+    // Afro texture bumps (small spheres for volume) - adjusted to new afro position
     for (let i = 0; i < 12; i++) {
       const bumpGeo = new THREE.SphereGeometry(0.08 + Math.random() * 0.05, 8, 8)
       const bump = new THREE.Mesh(bumpGeo, afroMat)
       const angle = (i / 12) * Math.PI * 2
-      const radius = 0.4
+      const radius = 0.38
       bump.position.set(
         Math.cos(angle) * radius * (0.8 + Math.random() * 0.4),
-        0.32 + Math.random() * 0.15,
-        Math.sin(angle) * radius * 0.6 - 0.08
+        0.28 + Math.random() * 0.15,
+        Math.sin(angle) * radius * 0.5 - 0.15 // Match new afro z position
       )
       group.add(bump)
     }
@@ -202,62 +236,174 @@ export class AfroSamurai implements ICharacter {
     tail2.rotation.set(0.4, 0.3, 0.5)
     group.add(tail2)
 
-    // Eyes - determined look with slight squint
-    const eyeWhiteGeo = new THREE.SphereGeometry(0.045, 8, 8)
+    // Eyes - expressive with shine (positioned on face surface)
+    const eyeWhiteGeo = new THREE.SphereGeometry(0.045, 12, 10)
     const eyeWhiteMat = new THREE.MeshStandardMaterial({ color: 0xfaf8f5 })
 
-    const eyeGeo = new THREE.SphereGeometry(0.025, 8, 8)
-    const eyeMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a })
+    const irisGeo = new THREE.SphereGeometry(0.028, 10, 10)
+    const irisMat = new THREE.MeshStandardMaterial({ color: 0x3d2817 }) // Dark brown iris
 
-    // Left eye
+    const pupilGeo = new THREE.SphereGeometry(0.015, 8, 8)
+    const pupilMat = new THREE.MeshStandardMaterial({ color: 0x0a0a0a })
+
+    // Eye shine/highlight
+    const shineGeo = new THREE.SphereGeometry(0.008, 6, 6)
+    const shineMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      emissive: 0xffffff,
+      emissiveIntensity: 0.5,
+    })
+
+    // Left eye assembly
     const leftEyeWhite = new THREE.Mesh(eyeWhiteGeo, eyeWhiteMat)
-    leftEyeWhite.position.set(-0.09, 0.18, 0.22)
-    leftEyeWhite.scale.set(1, 0.7, 0.5) // Squinted
+    leftEyeWhite.position.set(-0.085, 0.13, 0.32)
+    leftEyeWhite.scale.set(1, 0.8, 0.6)
     group.add(leftEyeWhite)
 
-    const leftEye = new THREE.Mesh(eyeGeo, eyeMat)
-    leftEye.position.set(-0.09, 0.17, 0.24)
+    const leftIris = new THREE.Mesh(irisGeo, irisMat)
+    leftIris.position.set(-0.085, 0.125, 0.36)
+    group.add(leftIris)
+
+    const leftEye = new THREE.Mesh(pupilGeo, pupilMat)
+    leftEye.position.set(-0.085, 0.12, 0.38)
     leftEye.name = 'leftEye'
     group.add(leftEye)
 
-    // Right eye
+    const leftShine = new THREE.Mesh(shineGeo, shineMat)
+    leftShine.position.set(-0.075, 0.14, 0.385)
+    group.add(leftShine)
+
+    // Right eye assembly
     const rightEyeWhite = new THREE.Mesh(eyeWhiteGeo, eyeWhiteMat)
-    rightEyeWhite.position.set(0.09, 0.18, 0.22)
-    rightEyeWhite.scale.set(1, 0.7, 0.5)
+    rightEyeWhite.position.set(0.085, 0.13, 0.32)
+    rightEyeWhite.scale.set(1, 0.8, 0.6)
     group.add(rightEyeWhite)
 
-    const rightEye = new THREE.Mesh(eyeGeo, eyeMat)
-    rightEye.position.set(0.09, 0.17, 0.24)
+    const rightIris = new THREE.Mesh(irisGeo, irisMat)
+    rightIris.position.set(0.085, 0.125, 0.36)
+    group.add(rightIris)
+
+    const rightEye = new THREE.Mesh(pupilGeo, pupilMat)
+    rightEye.position.set(0.085, 0.12, 0.38)
     rightEye.name = 'rightEye'
     group.add(rightEye)
 
-    // Eyebrows - thick, serious
-    const browGeo = new THREE.BoxGeometry(0.08, 0.02, 0.02)
+    const rightShine = new THREE.Mesh(shineGeo, shineMat)
+    rightShine.position.set(0.095, 0.14, 0.385)
+    group.add(rightShine)
+
+    // Eyelids (for expression)
+    const eyelidGeo = new THREE.SphereGeometry(0.05, 8, 4, 0, Math.PI * 2, 0, Math.PI / 3)
+    const eyelidMat = new THREE.MeshStandardMaterial({ color: COLORS.skin })
+
+    const leftEyelid = new THREE.Mesh(eyelidGeo, eyelidMat)
+    leftEyelid.position.set(-0.085, 0.15, 0.33)
+    leftEyelid.rotation.x = Math.PI
+    leftEyelid.scale.set(1, 0.5, 0.6)
+    group.add(leftEyelid)
+
+    const rightEyelid = new THREE.Mesh(eyelidGeo, eyelidMat)
+    rightEyelid.position.set(0.085, 0.15, 0.33)
+    rightEyelid.rotation.x = Math.PI
+    rightEyelid.scale.set(1, 0.5, 0.6)
+    group.add(rightEyelid)
+
+    // Eyebrows - thick, expressive
+    const browGeo = new THREE.BoxGeometry(0.08, 0.022, 0.025)
     const browMat = new THREE.MeshStandardMaterial({ color: COLORS.afro })
 
     const leftBrow = new THREE.Mesh(browGeo, browMat)
-    leftBrow.position.set(-0.09, 0.26, 0.24)
+    leftBrow.position.set(-0.08, 0.21, 0.32)
     leftBrow.rotation.z = 0.15
     group.add(leftBrow)
 
     const rightBrow = new THREE.Mesh(browGeo, browMat)
-    rightBrow.position.set(0.09, 0.26, 0.24)
+    rightBrow.position.set(0.08, 0.21, 0.32)
     rightBrow.rotation.z = -0.15
     group.add(rightBrow)
 
-    // Nose - subtle
-    const noseGeo = new THREE.SphereGeometry(0.04, 6, 6)
+    // Nose - detailed with nostrils
+    const noseGeo = new THREE.SphereGeometry(0.04, 8, 8)
     const nose = new THREE.Mesh(noseGeo, skinMat)
-    nose.position.set(0, 0.12, 0.26)
-    nose.scale.set(0.8, 1, 0.6)
+    nose.position.set(0, 0.06, 0.38)
+    nose.scale.set(0.9, 1.1, 0.65)
     group.add(nose)
 
-    // Mouth line
-    const mouthGeo = new THREE.BoxGeometry(0.06, 0.01, 0.01)
-    const mouthMat = new THREE.MeshStandardMaterial({ color: COLORS.skinDark })
-    const mouth = new THREE.Mesh(mouthGeo, mouthMat)
-    mouth.position.set(0, 0.04, 0.26)
-    group.add(mouth)
+    // Nostrils
+    const nostrilGeo = new THREE.SphereGeometry(0.012, 6, 6)
+    const nostrilMat = new THREE.MeshStandardMaterial({ color: COLORS.skinDark })
+
+    const leftNostril = new THREE.Mesh(nostrilGeo, nostrilMat)
+    leftNostril.position.set(-0.018, 0.03, 0.4)
+    group.add(leftNostril)
+
+    const rightNostril = new THREE.Mesh(nostrilGeo, nostrilMat)
+    rightNostril.position.set(0.018, 0.03, 0.4)
+    group.add(rightNostril)
+
+    // Mouth with smile - upper lip
+    const upperLipGeo = new THREE.TorusGeometry(0.035, 0.012, 8, 12, Math.PI)
+    const lipMat = new THREE.MeshStandardMaterial({ color: 0x6b3a2a }) // Darker lip color
+    const upperLip = new THREE.Mesh(upperLipGeo, lipMat)
+    upperLip.position.set(0, -0.01, 0.365)
+    upperLip.rotation.x = Math.PI / 2
+    upperLip.rotation.z = Math.PI
+    group.add(upperLip)
+
+    // Lower lip
+    const lowerLipGeo = new THREE.TorusGeometry(0.032, 0.015, 8, 12, Math.PI)
+    const lowerLip = new THREE.Mesh(lowerLipGeo, lipMat)
+    lowerLip.position.set(0, -0.025, 0.365)
+    lowerLip.rotation.x = Math.PI / 2
+    group.add(lowerLip)
+
+    // Teeth (visible in smile)
+    const teethGeo = new THREE.BoxGeometry(0.05, 0.015, 0.01)
+    const teethMat = new THREE.MeshStandardMaterial({ color: 0xfffef8 })
+    const teeth = new THREE.Mesh(teethGeo, teethMat)
+    teeth.position.set(0, -0.015, 0.36)
+    group.add(teeth)
+
+    // Mouth interior
+    const mouthInteriorGeo = new THREE.SphereGeometry(0.03, 8, 8)
+    const mouthInteriorMat = new THREE.MeshStandardMaterial({ color: 0x4a1818 })
+    const mouthInterior = new THREE.Mesh(mouthInteriorGeo, mouthInteriorMat)
+    mouthInterior.position.set(0, -0.015, 0.34)
+    mouthInterior.scale.set(1.2, 0.5, 0.5)
+    group.add(mouthInterior)
+
+    // Chin definition
+    const chinGeo = new THREE.SphereGeometry(0.05, 8, 8)
+    const chin = new THREE.Mesh(chinGeo, skinMat)
+    chin.position.set(0, -0.08, 0.32)
+    chin.scale.set(1, 0.6, 0.7)
+    group.add(chin)
+
+    // Cheekbones
+    const cheekGeo = new THREE.SphereGeometry(0.04, 8, 8)
+
+    const leftCheek = new THREE.Mesh(cheekGeo, skinMat)
+    leftCheek.position.set(-0.12, 0.04, 0.3)
+    leftCheek.scale.set(0.8, 0.6, 0.5)
+    group.add(leftCheek)
+
+    const rightCheek = new THREE.Mesh(cheekGeo, skinMat)
+    rightCheek.position.set(0.12, 0.04, 0.3)
+    rightCheek.scale.set(0.8, 0.6, 0.5)
+    group.add(rightCheek)
+
+    // Ears
+    const earGeo = new THREE.SphereGeometry(0.04, 8, 8)
+
+    const leftEar = new THREE.Mesh(earGeo, skinMat)
+    leftEar.position.set(-0.24, 0.1, 0.05)
+    leftEar.scale.set(0.5, 0.8, 0.4)
+    group.add(leftEar)
+
+    const rightEar = new THREE.Mesh(earGeo, skinMat)
+    rightEar.position.set(0.24, 0.1, 0.05)
+    rightEar.scale.set(0.5, 0.8, 0.4)
+    group.add(rightEar)
 
     // Visor placeholder for animation compatibility
     const visor = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.01, 0.01))
@@ -265,8 +411,8 @@ export class AfroSamurai implements ICharacter {
     visor.name = 'visor'
     group.add(visor)
 
-    // Position head group
-    group.position.y = 0.95
+    // Position head group (raised to sit properly above body)
+    group.position.y = 1.1
 
     return group
   }
@@ -711,7 +857,168 @@ export class AfroSamurai implements ICharacter {
     this.idleBehaviorManager.forcePlay(name, this.getCharacterParts())
   }
 
+  /**
+   * Make the samurai say something with a 3D speech bubble
+   */
+  say(text: string, duration = 3000): void {
+    this.clearSpeechBubble()
+
+    this.speechBubble = new THREE.Group()
+
+    // Main bubble body (rounded box shape made from primitives)
+    const bubbleWidth = Math.min(1.2, 0.3 + text.length * 0.025)
+    const bubbleHeight = 0.35
+    const bubbleDepth = 0.15
+
+    // White bubble body
+    const bodyGeo = new THREE.BoxGeometry(bubbleWidth, bubbleHeight, bubbleDepth)
+    const bubbleMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      roughness: 0.3,
+      metalness: 0.05,
+    })
+    const body = new THREE.Mesh(bodyGeo, bubbleMat)
+    this.speechBubble.add(body)
+
+    // Rounded edges (cylinders at corners)
+    const edgeRadius = 0.06
+    const edgeGeo = new THREE.CylinderGeometry(edgeRadius, edgeRadius, bubbleDepth, 8)
+    edgeGeo.rotateX(Math.PI / 2)
+
+    const corners = [
+      [-bubbleWidth / 2 + edgeRadius, bubbleHeight / 2 - edgeRadius, 0],
+      [bubbleWidth / 2 - edgeRadius, bubbleHeight / 2 - edgeRadius, 0],
+      [-bubbleWidth / 2 + edgeRadius, -bubbleHeight / 2 + edgeRadius, 0],
+      [bubbleWidth / 2 - edgeRadius, -bubbleHeight / 2 + edgeRadius, 0],
+    ]
+
+    corners.forEach(([x, y, z]) => {
+      const edge = new THREE.Mesh(edgeGeo, bubbleMat)
+      edge.position.set(x, y, z)
+      this.speechBubble!.add(edge)
+    })
+
+    // Speech bubble tail (cone pointing down)
+    const tailGeo = new THREE.ConeGeometry(0.08, 0.2, 4)
+    const tail = new THREE.Mesh(tailGeo, bubbleMat)
+    tail.position.set(0, -bubbleHeight / 2 - 0.1, 0)
+    tail.rotation.z = Math.PI
+    this.speechBubble.add(tail)
+
+    // Border/outline
+    const borderMat = new THREE.MeshStandardMaterial({
+      color: 0x333333,
+      roughness: 0.8,
+    })
+    const borderGeo = new THREE.BoxGeometry(
+      bubbleWidth + 0.03,
+      bubbleHeight + 0.03,
+      bubbleDepth - 0.02
+    )
+    const border = new THREE.Mesh(borderGeo, borderMat)
+    border.position.z = -0.01
+    this.speechBubble.add(border)
+
+    // Text as canvas texture on a plane
+    const canvas = document.createElement('canvas')
+    const ctx = canvas.getContext('2d')!
+    canvas.width = 512
+    canvas.height = 128
+
+    ctx.fillStyle = 'transparent'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+    ctx.fillStyle = '#1a1a1a'
+    ctx.font = 'bold 32px Arial, sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+
+    // Word wrap
+    const words = text.split(' ')
+    let line = ''
+    const lines: string[] = []
+    const maxWidth = canvas.width - 40
+
+    for (const word of words) {
+      const testLine = line + word + ' '
+      const metrics = ctx.measureText(testLine)
+      if (metrics.width > maxWidth && line !== '') {
+        lines.push(line.trim())
+        line = word + ' '
+      } else {
+        line = testLine
+      }
+    }
+    lines.push(line.trim())
+
+    const lineHeight = 36
+    const startY = canvas.height / 2 - ((lines.length - 1) * lineHeight) / 2
+    lines.forEach((l, i) => {
+      ctx.fillText(l, canvas.width / 2, startY + i * lineHeight)
+    })
+
+    const textTexture = new THREE.CanvasTexture(canvas)
+    const textMat = new THREE.MeshBasicMaterial({
+      map: textTexture,
+      transparent: true,
+      depthWrite: false,
+    })
+    const textPlane = new THREE.Mesh(
+      new THREE.PlaneGeometry(bubbleWidth - 0.1, bubbleHeight - 0.08),
+      textMat
+    )
+    textPlane.position.z = bubbleDepth / 2 + 0.01
+    this.speechBubble.add(textPlane)
+
+    // Position bubble above head
+    this.speechBubble.position.set(0, 2.2, 0.3)
+
+    // Make bubble always face camera (billboarding) - set in update
+    this.mesh.add(this.speechBubble)
+
+    // Auto-clear after duration
+    this.speechTimeout = window.setTimeout(() => {
+      this.clearSpeechBubble()
+    }, duration)
+  }
+
+  /**
+   * Say a random phrase for the current mood
+   */
+  sayRandom(mood: 'idle' | 'working' | 'thinking' | 'success' | 'error' = 'idle'): void {
+    const phrases = AfroSamurai.PHRASES[mood]
+    const phrase = phrases[Math.floor(Math.random() * phrases.length)]
+    this.say(phrase)
+  }
+
+  /**
+   * Clear the speech bubble
+   */
+  private clearSpeechBubble(): void {
+    if (this.speechTimeout) {
+      clearTimeout(this.speechTimeout)
+      this.speechTimeout = null
+    }
+    if (this.speechBubble) {
+      this.mesh.remove(this.speechBubble)
+      // Dispose all geometries and materials in the group
+      this.speechBubble.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          child.geometry.dispose()
+          if (child.material instanceof THREE.Material) {
+            if ((child.material as THREE.MeshBasicMaterial).map) {
+              ;(child.material as THREE.MeshBasicMaterial).map?.dispose()
+            }
+            child.material.dispose()
+          }
+        }
+      })
+      this.speechBubble = null
+    }
+  }
+
   dispose(): void {
+    this.clearSpeechBubble()
     if (this.updateCallback) {
       this.scene.offRender(this.updateCallback)
     }

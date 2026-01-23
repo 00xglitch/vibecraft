@@ -13,11 +13,7 @@ import * as THREE from 'three'
 import type { StationType } from '../../shared/types'
 import type { WorkshopScene } from '../scene/WorkshopScene'
 import type { ICharacter, CharacterOptions, CharacterState } from './ICharacter'
-import {
-  IdleBehaviorManager,
-  WorkingBehaviorManager,
-  type CharacterParts,
-} from './animations'
+import { IdleBehaviorManager, WorkingBehaviorManager, type CharacterParts } from './animations'
 
 export type RickOptions = CharacterOptions
 
@@ -132,11 +128,7 @@ export class Rick implements ICharacter {
       const spikeGeometry = new THREE.ConeGeometry(0.06, 0.22, 6)
       const spike = new THREE.Mesh(spikeGeometry, hairMaterial)
       const rad = (angle * Math.PI) / 180
-      spike.position.set(
-        Math.sin(rad) * 0.12,
-        0.18 + (i % 2) * 0.04,
-        -Math.cos(rad) * 0.08
-      )
+      spike.position.set(Math.sin(rad) * 0.12, 0.18 + (i % 2) * 0.04, -Math.cos(rad) * 0.08)
       spike.rotation.x = -0.3 + (Math.random() - 0.5) * 0.2
       spike.rotation.z = (Math.random() - 0.5) * 0.3
       group.add(spike)
@@ -336,8 +328,7 @@ export class Rick implements ICharacter {
 
     // Movement
     if (this.targetPosition) {
-      const direction = new THREE.Vector3()
-        .subVectors(this.targetPosition, this.mesh.position)
+      const direction = new THREE.Vector3().subVectors(this.targetPosition, this.mesh.position)
       const distance = direction.length()
 
       if (distance > 0.1) {
@@ -435,6 +426,25 @@ export class Rick implements ICharacter {
         ringMaterial.color.setHex(0xa855f7)
         break
     }
+  }
+
+  public setStatusColor(color: number): void {
+    const ring = this.statusRing.material as THREE.MeshBasicMaterial
+    ring.color.setHex(color)
+  }
+
+  public playRandomIdleBehavior(): void {
+    if (this.state !== 'idle') {
+      this.setState('idle')
+    }
+    this.idleBehaviorManager.forcePlayRandom(this.getCharacterParts())
+  }
+
+  public playIdleBehavior(name: string): void {
+    if (this.state !== 'idle') {
+      this.setState('idle')
+    }
+    this.idleBehaviorManager.forcePlay(name, this.getCharacterParts())
   }
 
   public dispose(): void {

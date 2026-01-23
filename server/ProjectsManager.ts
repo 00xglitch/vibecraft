@@ -57,7 +57,7 @@ export class ProjectsManager {
    */
   addProject(path: string, name?: string): void {
     const absPath = resolve(path)
-    const existing = this.projects.find(p => p.path === absPath)
+    const existing = this.projects.find((p) => p.path === absPath)
 
     if (existing) {
       existing.lastUsed = Date.now()
@@ -80,7 +80,7 @@ export class ProjectsManager {
    */
   removeProject(path: string): void {
     const absPath = resolve(path)
-    this.projects = this.projects.filter(p => p.path !== absPath)
+    this.projects = this.projects.filter((p) => p.path !== absPath)
     this.save()
   }
 
@@ -97,7 +97,7 @@ export class ProjectsManager {
 
     // Normalize the partial path
     const normalizedPartial = partial.startsWith('~')
-      ? resolve(homedir(), partial.slice(1))  // ~/foo → /home/user/foo, ~ → /home/user
+      ? resolve(homedir(), partial.slice(1)) // ~/foo → /home/user/foo, ~ → /home/user
       : partial
 
     // Check if user is actively browsing (path ends with /)
@@ -141,8 +141,8 @@ export class ProjectsManager {
     } else {
       // Not browsing - known projects first, then filesystem
       // Re-sort: projects at front
-      const knownPaths = new Set(this.projects.map(p => p.path))
-      const fsOnly = results.filter(r => !knownPaths.has(r))
+      const knownPaths = new Set(this.projects.map((p) => p.path))
+      const fsOnly = results.filter((r) => !knownPaths.has(r))
       results.length = 0
       results.push(...matchingProjects, ...fsOnly)
     }
@@ -206,6 +206,75 @@ export class ProjectsManager {
     }
 
     return results
+  }
+
+  /**
+   * Discover git repositories in a given directory
+   * Scans up to maxDepth levels deep
+   */
+  discoverProjects(rootDir: string, maxDepth = 2): KnownProject[] {
+    const discovered: KnownProject[] = []
+    const absRoot = resolve(rootDir.startsWith('~') ? homedir() + rootDir.slice(1) : rootDir)
+
+    const scan = (dir: string, depth: number) => {
+      if (depth > maxDepth) return
+
+      try {
+        const entries = readdirSync(dir)
+
+        // Check if this directory is a git repo
+        if (entries.includes('.git')) {
+          const gitPath = join(dir, '.git')
+          try {
+            if (statSync(gitPath).isDirectory()) {
+              // It's a git repo - add it if not already known
+              if (!this.projects.some((p) => p.path === dir)) {
+                discovered.push({
+                  path: dir,
+                  name: basename(dir),
+                  lastUsed: 0,
+                  useCount: 0,
+                })
+              }
+            }
+          } catch {
+            // Not a valid git directory
+          }
+        }
+
+        // Recurse into subdirectories
+        for (const entry of entries) {
+          if (entry.startsWith('.')) continue // Skip hidden dirs
+          if (entry === 'node_modules' || entry === 'vendor' || entry === '.git') continue
+
+          const fullPath = join(dir, entry)
+          try {
+            if (statSync(fullPath).isDirectory()) {
+              scan(fullPath, depth + 1)
+            }
+          } catch {
+            // Skip inaccessible directories
+          }
+        }
+      } catch {
+        // Can't read directory
+      }
+    }
+
+    scan(absRoot, 0)
+    return discovered
+  }
+
+  /**
+   * Add discovered projects to the known list
+   */
+  addDiscoveredProjects(projects: KnownProject[]): void {
+    for (const project of projects) {
+      if (!this.projects.some((p) => p.path === project.path)) {
+        this.projects.push(project)
+      }
+    }
+    this.save()
   }
 
   /**

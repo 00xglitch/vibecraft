@@ -1,0 +1,121 @@
+# Vibecraft Development Docker Compose
+#
+# Hot reload enabled for rapid development and testing.
+# Source code is mounted directly into containers.
+#
+# Usage:
+#   docker-compose -f docker-compose.dev.yml up -d
+#   docker-compose -f docker-compose.dev.yml logs -f vibecraft-hub
+#
+# Start Claude in a worker:
+#   docker exec -it vibecraft-dev-worker-1 tmux new-session -s claude "claude --dangerously-skip-permissions"
+#
+# Quick Claude session (non-tmux):
+#   docker exec -it vibecraft-dev-worker-1 claude
+#
+# Access worker shell:
+#   docker exec -it vibecraft-dev-worker-1 bash
+
+version: '3.8'
+
+services:
+  # ==========================================================================
+  # Vibecraft Hub (Development Mode with Hot Reload)
+  # ==========================================================================
+  vibecraft-hub:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: vibecraft-dev-hub
+    ports:
+      - "${VIBECRAFT_PORT:-4003}:4003"
+      - "${VIBECRAFT_CLIENT_PORT:-4002}:4002"
+    volumes:
+      # Mount source for hot reload (with delegated for WSL performance)
+      - ./src:/app/src:delegated
+      - ./server:/app/server:delegated
+      - ./shared:/app/shared:delegated
+      - ./index.html:/app/index.html:delegated
+      - ./vite.config.ts:/app/vite.config.ts:delegated
+      - ./tsconfig.json:/app/tsconfig.json:delegated
+      - ./tsconfig.server.json:/app/tsconfig.server.json:delegated
+      - ./hooks:/app/hooks:delegated
+      - ./public:/app/public:delegated
+      # Shared data volume
+      - vibecraft-dev-data:/data
+      # Node modules (don't mount, use container's)
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+      - VIBECRAFT_PORT=4003
+      - VIBECRAFT_CLIENT_PORT=4002
+      - VIBECRAFT_DATA_DIR=/data
+      - VIBECRAFT_DEBUG=true
+      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY:-}
+      # Enable polling for file watching (WSL/Docker compatibility)
+      - CHOKIDAR_USEPOLLING=true
+      - CHOKIDAR_INTERVAL=300
+    networks:
+      - vibecraft-dev-net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # Use tsx watch for hot reload
+    command: ["npm", "run", "dev"]
+
+  # ==========================================================================
+  # Claude Worker (Development)
+  # ==========================================================================
+  claude-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.claude
+    volumes:
+      # Shared data volume
+      - vibecraft-dev-data:/root/.vibecraft/data:rw
+      # Mount current project for Claude to work on
+      - ${CLAUDE_WORKSPACE:-.}:/workspace:rw
+      # Mount user's home workspace for browsing (WSL support)
+      - ${HOME:-/home}:/mnt/home:ro
+      # Mount hooks for easy updates
+      - ./hooks:/root/.vibecraft/hooks:ro
+      # Persist Claude settings and cache
+      - claude-config:/root/.claude
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - VIBECRAFT_WS_NOTIFY=http://vibecraft-hub:4003/event
+      - VIBECRAFT_ENABLE_WS_NOTIFY=true
+      - VIBECRAFT_DATA_DIR=/root/.vibecraft/data
+      - NODE_ENV=development
+      - TERM=xterm-256color
+    depends_on:
+      - vibecraft-hub
+    networks:
+      - vibecraft-dev-net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    deploy:
+      replicas: ${CLAUDE_INSTANCES:-2}
+    stdin_open: true
+    tty: true
+    # Healthcheck to ensure Claude CLI is available
+    healthcheck:
+      test: ["CMD", "which", "claude"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  vibecraft-dev-net:
+    driver: bridge
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  vibecraft-dev-data:
+    driver: local
+  claude-config:
+    driver: local

@@ -26,7 +26,7 @@ import {
 } from 'fs'
 import { exec, execFile } from 'child_process'
 import { dirname, resolve, join, extname } from 'path'
-import { hostname } from 'os'
+import { hostname, homedir } from 'os'
 import { randomUUID, randomBytes } from 'crypto'
 import { createClient, LiveTranscriptionEvents } from '@deepgram/sdk'
 import type { LiveClient } from '@deepgram/sdk'
@@ -36,6 +36,7 @@ import type {
   ClientMessage,
   PreToolUseEvent,
   PostToolUseEvent,
+  StopEvent,
   ManagedSession,
   CreateSessionRequest,
   CreateImplicitSessionRequest,
@@ -1142,11 +1143,27 @@ async function createSession(options: CreateSessionRequest = {}): Promise<Manage
 }
 
 /**
+ * Check if a path is a double-shot-latte directory (DSL hook's working directory)
+ * These sessions are ephemeral and shouldn't be tracked as implicit sessions.
+ */
+function isDoubleeShotLatteDirectory(cwd: string | undefined): boolean {
+  if (!cwd) return false
+  return cwd.includes('double-shot-latte') || cwd.includes('.claude/hooks')
+}
+
+/**
  * Create an implicit managed session for external Claude instances.
  * These sessions have no tmux control - they just track events from external Claude.
+ * Returns null for DSL sessions which shouldn't be tracked.
  */
-function createImplicitSession(options: CreateImplicitSessionRequest): ManagedSession {
+function createImplicitSession(options: CreateImplicitSessionRequest): ManagedSession | null {
   const { claudeSessionId, cwd } = options
+
+  // Skip creating sessions for double-shot-latte (ephemeral hook sessions)
+  if (isDoubleeShotLatteDirectory(cwd)) {
+    debug(`Skipping implicit session for DSL directory: ${cwd}`)
+    return null
+  }
 
   // Check if already exists
   const existing = findManagedSession(claudeSessionId)
@@ -1352,9 +1369,12 @@ async function sendPromptToSession(
     return sendPromptToOpenCodeSession(session, prompt, { opencodeSessions, log })
   }
 
-  // Implicit sessions don't have tmux control
+  // Implicit sessions don't have tmux control - suggest restart to adopt
   if (isImplicitSession(session)) {
-    return { ok: false, error: 'Cannot send prompts to external sessions (no tmux control)' }
+    return {
+      ok: false,
+      error: 'External session has no tmux control. Click restart (🔄) to adopt it.',
+    }
   }
 
   if (!session.tmuxSession) {
@@ -1822,15 +1842,15 @@ const pendingFileChanges = new Map<string, string>()
 /** File-modifying tools that should be tracked for rollback */
 const FILE_MODIFYING_TOOLS = ['Edit', 'Write', 'NotebookEdit']
 
-function processEvent(event: ClaudeEvent): ClaudeEvent {
+function processEvent(event: ClaudeEvent, opts?: { skipChangeTracking?: boolean }): ClaudeEvent {
   // Track pre_tool_use for duration calculation
   if (event.type === 'pre_tool_use') {
     const preEvent = event as PreToolUseEvent
     pendingToolUses.set(preEvent.toolUseId, preEvent)
     debug(`Tracking tool use: ${preEvent.tool} (${preEvent.toolUseId})`)
 
-    // Track file changes for Edit/Write tools
-    if (FILE_MODIFYING_TOOLS.includes(preEvent.tool)) {
+    // Track file changes for Edit/Write tools (skip during historical load)
+    if (!opts?.skipChangeTracking && FILE_MODIFYING_TOOLS.includes(preEvent.tool)) {
       const toolInput = preEvent.toolInput as Record<string, string> | undefined
       const filePath = toolInput?.file_path || toolInput?.notebook_path
       if (filePath) {
@@ -1862,21 +1882,23 @@ function processEvent(event: ClaudeEvent): ClaudeEvent {
       debug(`Tool ${postEvent.tool} took ${postEvent.duration}ms`)
     }
 
-    // Complete file change tracking for Edit/Write tools
-    const changeId = pendingFileChanges.get(postEvent.toolUseId)
-    if (changeId) {
-      // Generate description from the event
-      const preEventForDesc = preEvent || pendingToolUses.get(postEvent.toolUseId)
-      let description = `${postEvent.tool} tool`
-      const toolInputForDesc = preEventForDesc?.toolInput as Record<string, string> | undefined
-      if (toolInputForDesc?.file_path) {
-        const fileName = toolInputForDesc.file_path.split('/').pop()
-        description = `${postEvent.tool}: ${fileName}`
-      }
+    // Complete file change tracking for Edit/Write tools (skip during historical load)
+    if (!opts?.skipChangeTracking) {
+      const changeId = pendingFileChanges.get(postEvent.toolUseId)
+      if (changeId) {
+        // Generate description from the event
+        const preEventForDesc = preEvent || pendingToolUses.get(postEvent.toolUseId)
+        let description = `${postEvent.tool} tool`
+        const toolInputForDesc = preEventForDesc?.toolInput as Record<string, string> | undefined
+        if (toolInputForDesc?.file_path) {
+          const fileName = toolInputForDesc.file_path.split('/').pop()
+          description = `${postEvent.tool}: ${fileName}`
+        }
 
-      changeTracker.recordAfter(changeId, description)
-      pendingFileChanges.delete(postEvent.toolUseId)
-      debug(`Completed file change tracking: ${changeId}`)
+        changeTracker.recordAfter(changeId, description)
+        pendingFileChanges.delete(postEvent.toolUseId)
+        debug(`Completed file change tracking: ${changeId}`)
+      }
     }
   }
 
@@ -1932,10 +1954,34 @@ function addEvent(event: ClaudeEvent) {
         managedSession.currentTool = undefined
         break
 
-      case 'stop':
+      case 'stop': {
+        const stopEvent = event as StopEvent
+        if (stopEvent.stopHookActive) {
+          // Double Shot Latte (or similar stop hook) is active
+          // Claude may auto-continue - mark DSL as active
+          managedSession.doubleShotActive = true
+          managedSession.doubleShotContinues = (managedSession.doubleShotContinues || 0) + 1
+          debug(
+            `DSL active for ${managedSession.name}, continues: ${managedSession.doubleShotContinues}`
+          )
+          // Keep working status - DSL will evaluate
+        } else {
+          // Normal stop - Claude finished
+          managedSession.status = 'idle'
+          managedSession.currentTool = undefined
+          // Reset DSL state
+          managedSession.doubleShotActive = false
+          managedSession.doubleShotContinues = 0
+        }
+        break
+      }
+
       case 'session_end':
         managedSession.status = 'idle'
         managedSession.currentTool = undefined
+        // Reset DSL state
+        managedSession.doubleShotActive = false
+        managedSession.doubleShotContinues = 0
         break
     }
 
@@ -1963,10 +2009,11 @@ function loadEventsFromFile() {
   const content = readFileSync(EVENTS_FILE, 'utf-8')
   const lines = content.trim().split('\n').filter(Boolean)
 
+  // Skip change tracking during historical load - changes are already persisted
   for (const line of lines) {
     try {
       const event = JSON.parse(line) as ClaudeEvent
-      processEvent(event)
+      processEvent(event, { skipChangeTracking: true })
       events.push(event)
     } catch (e) {
       debug(`Failed to parse event line: ${line}`)
@@ -2455,6 +2502,12 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
             return
           }
           const session = createImplicitSession(options)
+          if (!session) {
+            // DSL sessions are skipped - return 200 OK with null session
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ ok: true, session: null, skipped: 'double-shot-latte' }))
+            return
+          }
           res.writeHead(201, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ ok: true, session }))
         } catch (e) {
@@ -2490,6 +2543,46 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
     return
   }
 
+  // Clean up old offline implicit sessions (especially double-shot-latte orphans)
+  if (req.method === 'POST' && req.url === '/sessions/cleanup') {
+    const now = Date.now()
+    const MAX_AGE_MS = 30 * 60 * 1000 // 30 minutes
+
+    const toDelete: string[] = []
+    for (const [id, session] of managedSessions) {
+      // Only clean up implicit sessions that are offline and old
+      if (
+        session.implicit &&
+        session.status === 'offline' &&
+        now - session.lastActivity > MAX_AGE_MS
+      ) {
+        toDelete.push(id)
+      }
+    }
+
+    // Delete them
+    for (const id of toDelete) {
+      const session = managedSessions.get(id)
+      if (session) {
+        // Remove from maps
+        if (session.claudeSessionId) {
+          claudeToManagedMap.delete(session.claudeSessionId)
+        }
+        managedSessions.delete(id)
+        log(`Cleaned up old implicit session: ${session.name} (${id.slice(0, 8)})`)
+      }
+    }
+
+    if (toDelete.length > 0) {
+      broadcastSessions()
+      saveSessions()
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ ok: true, deleted: toDelete.length }))
+    return
+  }
+
   // ============================================================================
   // Projects API (known directories for autocomplete)
   // ============================================================================
@@ -2517,6 +2610,65 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
     projectsManager.removeProject(path)
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ ok: true }))
+    return
+  }
+
+  // Discover git projects in a directory
+  if (req.method === 'POST' && req.url === '/projects/discover') {
+    collectRequestBody(req)
+      .then((body) => {
+        try {
+          const request = JSON.parse(body) as {
+            path: string
+            maxDepth?: number
+            addToKnown?: boolean
+          }
+          const rootPath = request.path || homedir()
+          const maxDepth = request.maxDepth ?? 2
+          const discovered = projectsManager.discoverProjects(rootPath, maxDepth)
+
+          // Optionally add to known projects
+          if (request.addToKnown) {
+            projectsManager.addDiscoveredProjects(discovered)
+          }
+
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: true, projects: discovered }))
+        } catch (err) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: String(err) }))
+        }
+      })
+      .catch(() => {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: 'Invalid request body' }))
+      })
+    return
+  }
+
+  // Add a project to the known list
+  if (req.method === 'POST' && req.url === '/projects') {
+    collectRequestBody(req)
+      .then((body) => {
+        try {
+          const request = JSON.parse(body) as { path: string; name?: string }
+          if (!request.path) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ ok: false, error: 'path is required' }))
+            return
+          }
+          projectsManager.addProject(request.path, request.name)
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: true }))
+        } catch (err) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: String(err) }))
+        }
+      })
+      .catch(() => {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: 'Invalid request body' }))
+      })
     return
   }
 
@@ -3277,19 +3429,33 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
         return
       }
 
-      if (!session.tmuxSession) {
-        res.writeHead(400, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ ok: false, error: 'Session has no tmux session' }))
-        return
-      }
+      // Handle implicit (external) sessions - "adopt" them by creating a real tmux session
+      const isImplicit = isImplicitSession(session)
+      let tmuxSession: string
 
-      // Validate inputs to prevent command injection
-      try {
-        validateTmuxSession(session.tmuxSession)
-      } catch (e) {
-        res.writeHead(400, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ ok: false, error: 'Invalid tmux session name' }))
-        return
+      if (isImplicit) {
+        // Generate a new proper tmux session name for this external session
+        const baseName = session.name.replace(/\s*\(ext\)$/, '').replace(/[^a-zA-Z0-9_-]/g, '-')
+        tmuxSession = `vibe-${baseName}-${Date.now().toString(36).slice(-4)}`
+        log(
+          `Adopting external session ${session.id.slice(0, 8)} with new tmux session: ${tmuxSession}`
+        )
+      } else {
+        if (!session.tmuxSession) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: 'Session has no tmux session' }))
+          return
+        }
+        tmuxSession = session.tmuxSession
+
+        // Validate inputs to prevent command injection
+        try {
+          validateTmuxSession(tmuxSession)
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: 'Invalid tmux session name' }))
+          return
+        }
       }
 
       let cwd: string
@@ -3306,10 +3472,8 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
         return
       }
 
-      // Kill existing tmux session if it exists (ignore errors)
-      // Capture tmuxSession as const since it's already validated above
-      const tmuxSession = session.tmuxSession
-      execFile('tmux', ['kill-session', '-t', tmuxSession], EXEC_OPTIONS, () => {
+      // Function to spawn the tmux session
+      const spawnTmuxSession = () => {
         // Respawn tmux session with claude using execFile
         // NOTE: Must wrap in bash -c to ensure PATH is properly exported.
         execFile(
@@ -3336,6 +3500,17 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
             session.lastActivity = Date.now()
             session.claudeSessionId = undefined // Will be re-linked when events come in
             session.currentTool = undefined
+            session.tmuxSession = tmuxSession // Update tmux session name
+
+            // Clear implicit flag if adopting external session
+            if (isImplicit) {
+              session.implicit = false
+              // Update name to remove (ext) suffix
+              session.name = session.name.replace(/\s*\(ext\)$/, '')
+              log(
+                `Adopted external session ${session.id.slice(0, 8)} - now managed with tmux: ${tmuxSession}`
+              )
+            }
 
             // Clear old linking
             for (const [claudeId, managedId] of claudeToManagedMap) {
@@ -3352,7 +3527,17 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
             res.end(JSON.stringify({ ok: true, session }))
           }
         )
-      })
+      }
+
+      // For implicit sessions, directly spawn (no existing tmux to kill)
+      // For regular sessions, kill existing tmux first, then spawn
+      if (isImplicit) {
+        spawnTmuxSession()
+      } else {
+        execFile('tmux', ['kill-session', '-t', tmuxSession], EXEC_OPTIONS, () => {
+          spawnTmuxSession()
+        })
+      }
       return
     }
 

@@ -8,6 +8,24 @@
 import type { ManagedSession, GitStatus } from '../../shared/types'
 import { soundManager } from '../audio'
 import { formatTimeAgo } from './FeedManager'
+
+// ============================================================================
+// File Change Types (from ChangeTracker)
+// ============================================================================
+
+interface FileChange {
+  id: string
+  sessionId: string
+  claudeSessionId?: string
+  toolUseId: string
+  tool: string
+  path: string
+  before: string | null
+  after: string
+  timestamp: number
+  rolledBack: boolean
+  description?: string
+}
 import { mcpRegistry } from '../mcp'
 import { SearchableSelect } from './SearchableSelect'
 import {
@@ -497,6 +515,12 @@ function renderContent(data: ZoneInfoData): void {
         : ''
     }
 
+    <!-- Recent File Changes (Rollback) -->
+    <div class="zone-info-section" id="zone-info-file-changes">
+      <div class="zone-info-section-title">Recent File Changes</div>
+      <div class="zone-info-changes-list zone-info-muted">Loading...</div>
+    </div>
+
     <!-- MCP Servers -->
     ${renderMCPServers()}
 
@@ -531,6 +555,9 @@ function renderContent(data: ZoneInfoData): void {
   if (isOpenCode) {
     setupProviderModelDropdowns(s)
   }
+
+  // Load file changes for this session
+  loadFileChanges(s.id)
 }
 
 function renderGitStatus(git: GitStatus): string {
@@ -712,4 +739,126 @@ function shortenPath(path: string): string {
   const parts = path.split('/')
   if (parts.length <= 3) return path
   return '.../' + parts.slice(-3).join('/')
+}
+
+// ============================================================================
+// File Changes / Rollback
+// ============================================================================
+
+/**
+ * Fetch and render file changes for a session
+ */
+async function loadFileChanges(sessionId: string): Promise<void> {
+  const container = document.getElementById('zone-info-file-changes')
+  if (!container) return
+
+  const listEl = container.querySelector('.zone-info-changes-list')
+  if (!listEl) return
+
+  try {
+    const resp = await fetch(`/api/changes/session/${sessionId}`)
+    if (!resp.ok) throw new Error('Failed to fetch changes')
+
+    const data = await resp.json()
+    const changes: FileChange[] = data.changes || []
+
+    if (changes.length === 0) {
+      listEl.innerHTML = '<span class="zone-info-muted">No file changes recorded</span>'
+      return
+    }
+
+    // Render up to 10 most recent changes
+    const recentChanges = changes.slice(0, 10)
+    listEl.innerHTML = recentChanges
+      .map((change) => {
+        const fileName = change.path.split('/').pop() || change.path
+        const timeAgo = formatTimeAgo(change.timestamp)
+        const toolIcon = change.tool === 'Edit' ? '✏️' : change.tool === 'Write' ? '📝' : '📄'
+        const isCreated = change.before === null
+        const isRolledBack = change.rolledBack
+
+        return `
+          <div class="zone-info-change-item ${isRolledBack ? 'zone-info-change-rolled-back' : ''}">
+            <div class="zone-info-change-header">
+              <span class="zone-info-change-icon">${toolIcon}</span>
+              <span class="zone-info-change-file" title="${escapeHtml(change.path)}">${escapeHtml(fileName)}</span>
+              <span class="zone-info-change-time">${timeAgo}</span>
+            </div>
+            <div class="zone-info-change-actions">
+              ${
+                isCreated
+                  ? '<span class="zone-info-change-badge zone-info-change-created">Created</span>'
+                  : '<span class="zone-info-change-badge zone-info-change-modified">Modified</span>'
+              }
+              ${
+                isRolledBack
+                  ? '<span class="zone-info-change-badge zone-info-change-reverted">Reverted</span>'
+                  : `<button class="zone-info-rollback-btn" data-change-id="${change.id}" title="Revert this change">↩ Rollback</button>`
+              }
+            </div>
+          </div>
+        `
+      })
+      .join('')
+
+    // Show count if more than displayed
+    if (changes.length > 10) {
+      listEl.innerHTML += `<div class="zone-info-muted">... and ${changes.length - 10} more changes</div>`
+    }
+
+    // Set up rollback button handlers
+    setupRollbackHandlers()
+  } catch (e) {
+    console.error('[ZoneInfoModal] Error loading file changes:', e)
+    listEl.innerHTML = '<span class="zone-info-muted">Failed to load changes</span>'
+  }
+}
+
+/**
+ * Set up click handlers for rollback buttons
+ */
+function setupRollbackHandlers(): void {
+  const buttons = document.querySelectorAll('.zone-info-rollback-btn')
+  buttons.forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault()
+      const changeId = (btn as HTMLElement).dataset.changeId
+      if (!changeId) return
+
+      // Confirm before rollback
+      const confirmed = confirm(
+        'Are you sure you want to rollback this file change? This will restore the file to its previous state.'
+      )
+      if (!confirmed) return
+
+      try {
+        const resp = await fetch(`/api/changes/${changeId}/rollback`, { method: 'POST' })
+        if (!resp.ok) {
+          const data = await resp.json()
+          throw new Error(data.error || 'Rollback failed')
+        }
+
+        // Update the UI
+        const item = btn.closest('.zone-info-change-item')
+        if (item) {
+          item.classList.add('zone-info-change-rolled-back')
+          const actions = item.querySelector('.zone-info-change-actions')
+          if (actions) {
+            btn.remove()
+            const badge = document.createElement('span')
+            badge.className = 'zone-info-change-badge zone-info-change-reverted'
+            badge.textContent = 'Reverted'
+            actions.appendChild(badge)
+          }
+        }
+
+        if (soundEnabled) {
+          soundManager.play('success')
+        }
+      } catch (e) {
+        console.error('[ZoneInfoModal] Rollback failed:', e)
+        alert(`Rollback failed: ${e instanceof Error ? e.message : 'Unknown error'}`)
+      }
+    })
+  })
 }

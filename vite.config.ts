@@ -18,6 +18,7 @@ export default defineConfig({
   },
   server: {
     port: clientPort,
+    host: '0.0.0.0', // Bind to all interfaces for Docker
     proxy: {
       '/ws': {
         target: `ws://localhost:${serverPort}`,

@@ -1,20 +1,25 @@
 # Vibecraft Multi-Instance Docker Compose
 #
-# For running multiple Claude worker instances alongside the main Vibecraft server.
-# Each worker can run a separate Claude session.
+# Runs the Vibecraft server + Claude worker containers that can run Claude sessions.
+# Workers have Claude CLI installed and are pre-configured with vibecraft hooks.
 #
 # Usage:
-#   docker-compose -f docker-compose.multi.yml up -d
-#   docker-compose -f docker-compose.multi.yml up -d --scale claude-worker=5
+#   docker-compose -f docker-compose.multi.yml up -d                    # Start with 3 workers
+#   docker-compose -f docker-compose.multi.yml up -d --scale claude-worker=5  # Start with 5 workers
+#
+# Start a Claude session in a worker:
+#   docker exec -it vibecraft-claude-1 claude --dangerously-skip-permissions
 #
 # Environment variables:
-#   CLAUDE_INSTANCES - Number of Claude worker containers (default: 3)
+#   ANTHROPIC_API_KEY    - Required for Claude CLI (set in .env or environment)
+#   CLAUDE_INSTANCES     - Number of worker containers (default: 3)
+#   VIBECRAFT_PORT       - Server port (default: 4003)
 
 version: '3.8'
 
 services:
   # ==========================================================================
-  # Vibecraft Hub (Main Server)
+  # Vibecraft Hub (Main Server + UI)
   # ==========================================================================
   vibecraft-hub:
     build:
@@ -24,9 +29,9 @@ services:
     ports:
       - "${VIBECRAFT_PORT:-4003}:4003"
     volumes:
-      # Shared data volume for all instances
+      # Shared data volume for events from all workers
       - vibecraft-shared:/data
-      # Optional: Mount host config for hooks
+      # Host hooks directory (read-only)
       - "${HOME}/.vibecraft/hooks:/app/hooks:ro"
     environment:
       - NODE_ENV=production
@@ -34,6 +39,7 @@ services:
       - VIBECRAFT_DATA_DIR=/data
       - VIBECRAFT_MODE=hub
       - VIBECRAFT_DEBUG=${VIBECRAFT_DEBUG:-false}
+      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY:-}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:4003/health"]
@@ -42,35 +48,54 @@ services:
       retries: 3
     networks:
       - vibecraft-net
+    # Enable host.docker.internal for Linux
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   # ==========================================================================
-  # Claude Worker Template
+  # Claude Worker Containers
   # ==========================================================================
-  # Workers connect back to the hub and can run Claude instances
+  # Each worker has Claude CLI installed and can run Claude sessions.
   # Scale with: --scale claude-worker=N
+  #
+  # To start Claude in a worker:
+  #   docker exec -it vibecraft-claude-worker-1 claude
+  #
   claude-worker:
-    image: node:20-alpine
+    build:
+      context: .
+      dockerfile: Dockerfile.claude
     volumes:
-      - vibecraft-shared:/data:rw
+      # Shared data volume - workers write events here
+      - vibecraft-shared:/root/.vibecraft/data:rw
+      # Mount a workspace directory for Claude to work in
+      - ${CLAUDE_WORKSPACE:-./workspace}:/workspace:rw
     environment:
-      - VIBECRAFT_HUB_URL=http://vibecraft-hub:4003
-      - VIBECRAFT_DATA_DIR=/data
+      # Required: Your Anthropic API key
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # Vibecraft event notification URL (used by hook script)
+      - VIBECRAFT_WS_NOTIFY=http://vibecraft-hub:4003/event
+      - VIBECRAFT_ENABLE_WS_NOTIFY=true
+      - VIBECRAFT_DATA_DIR=/root/.vibecraft/data
       - NODE_ENV=production
     depends_on:
       vibecraft-hub:
         condition: service_healthy
     networks:
       - vibecraft-net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     deploy:
       replicas: ${CLAUDE_INSTANCES:-3}
       resources:
         limits:
-          memory: 512M
+          memory: 1G
         reservations:
-          memory: 256M
-    # Workers just need to exist - actual Claude orchestration is done via API
-    command: ["sh", "-c", "echo 'Worker ready' && sleep infinity"]
+          memory: 512M
     restart: unless-stopped
+    # Enable pseudo-TTY for interactive Claude sessions
+    stdin_open: true
+    tty: true
 
 # =============================================================================
 # Networks

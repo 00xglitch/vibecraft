@@ -25,8 +25,114 @@
     <!-- Analytics -->
     <script src="https://cdn.amplitude.com/script/3b78e993d3c7ddad9fb9ae615cc094b6.js"></script>
     <script>window.amplitude.init('3b78e993d3c7ddad9fb9ae615cc094b6', {"fetchRemoteConfig":true,"autocapture":{"attribution":true,"fileDownloads":true,"formInteractions":true,"pageViews":true,"sessions":true,"elementInteractions":true,"networkTracking":true,"webVitals":true,"frustrationInteractions":true}});</script>
+
+    <!-- Loading spinner styles (inline for immediate display) -->
+    <style>
+      #app-loader {
+        position: fixed;
+        inset: 0;
+        z-index: 99999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+        transition: opacity 0.4s ease, visibility 0.4s ease;
+      }
+      #app-loader.hidden {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+      }
+      .loader-hex {
+        width: 80px;
+        height: 92px;
+        position: relative;
+        animation: loader-pulse 1.5s ease-in-out infinite;
+      }
+      .loader-hex::before,
+      .loader-hex::after {
+        content: '';
+        position: absolute;
+        width: 40px;
+        height: 69px;
+        background: linear-gradient(180deg, #06b6d4 0%, #3b82f6 100%);
+        border-radius: 4px;
+        animation: loader-glow 1.5s ease-in-out infinite;
+      }
+      .loader-hex::before {
+        left: 0;
+        transform: rotate(-30deg);
+        transform-origin: center;
+      }
+      .loader-hex::after {
+        right: 0;
+        transform: rotate(30deg);
+        transform-origin: center;
+      }
+      @keyframes loader-pulse {
+        0%, 100% { transform: scale(1); }
+        50% { transform: scale(1.05); }
+      }
+      @keyframes loader-glow {
+        0%, 100% { box-shadow: 0 0 20px rgba(6, 182, 212, 0.4); }
+        50% { box-shadow: 0 0 40px rgba(6, 182, 212, 0.8), 0 0 60px rgba(59, 130, 246, 0.4); }
+      }
+      .loader-spinner {
+        width: 48px;
+        height: 48px;
+        border: 3px solid rgba(99, 102, 241, 0.2);
+        border-top-color: #06b6d4;
+        border-radius: 50%;
+        animation: loader-spin 1s linear infinite;
+        margin-bottom: 24px;
+      }
+      @keyframes loader-spin {
+        to { transform: rotate(360deg); }
+      }
+      .loader-text {
+        color: #94a3b8;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-size: 14px;
+        margin-top: 20px;
+        letter-spacing: 1px;
+        animation: loader-text-pulse 2s ease-in-out infinite;
+      }
+      @keyframes loader-text-pulse {
+        0%, 100% { opacity: 0.6; }
+        50% { opacity: 1; }
+      }
+      .loader-dots {
+        display: inline-flex;
+        gap: 4px;
+        margin-left: 4px;
+      }
+      .loader-dots span {
+        width: 4px;
+        height: 4px;
+        background: #06b6d4;
+        border-radius: 50%;
+        animation: loader-dot 1.2s ease-in-out infinite;
+      }
+      .loader-dots span:nth-child(2) { animation-delay: 0.2s; }
+      .loader-dots span:nth-child(3) { animation-delay: 0.4s; }
+      @keyframes loader-dot {
+        0%, 80%, 100% { transform: scale(0); opacity: 0; }
+        40% { transform: scale(1); opacity: 1; }
+      }
+    </style>
   </head>
   <body>
+    <!-- Loading screen (shown until app initializes) -->
+    <div id="app-loader">
+      <div class="loader-spinner"></div>
+      <div class="loader-text">
+        Loading Vibecraft
+        <span class="loader-dots">
+          <span></span><span></span><span></span>
+        </span>
+      </div>
+    </div>
     <div id="app">
       <!-- Left: 3D Scene -->
       <div id="scene-panel">
@@ -42,6 +148,8 @@
             <span id="token-counter" class="hud-tokens" title="Tokens used this session">⚡ 0 tok</span>
             <span class="hud-sep">|</span>
             <button id="settings-btn" class="hud-btn" title="Settings">⚙️</button>
+            <button id="plugins-btn" class="hud-btn" title="Plugins & MCPs">🔌</button>
+            <button id="help-btn" class="hud-btn" title="Help & Keyboard Shortcuts">❓</button>
             <!-- Debug: FPS counter (uncomment to enable)
             <span class="hud-sep">|</span>
             <span id="fps" class="hud-fps">-- FPS</span>
@@ -373,6 +481,83 @@
 
         <div class="modal-actions">
           <button type="button" class="modal-btn modal-btn-cancel" id="settings-close">✕ Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Plugins & MCPs Modal -->
+    <div id="plugins-modal">
+      <div class="modal-content plugins-modal-content">
+        <div class="modal-header">
+          <h3>🔌 Plugins & MCPs</h3>
+          <button type="button" class="modal-close-btn" id="plugins-close">×</button>
+        </div>
+
+        <div class="plugins-tabs">
+          <button class="plugins-tab active" data-tab="mcp">MCP Servers</button>
+          <button class="plugins-tab" data-tab="plugins">Plugins</button>
+          <button class="plugins-tab" data-tab="marketplace">Marketplace</button>
+        </div>
+
+        <div class="plugins-tab-content" id="plugins-tab-mcp">
+          <div class="plugins-section">
+            <div class="plugins-section-header">
+              <span class="plugins-section-title">Active MCP Servers</span>
+              <span class="plugins-count" id="mcp-count">0</span>
+            </div>
+            <div id="mcp-servers-list" class="plugins-list">
+              <div class="plugins-empty">No MCP servers detected yet. They appear as Claude uses MCP tools.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="plugins-tab-content hidden" id="plugins-tab-plugins">
+          <div class="plugins-section">
+            <div class="plugins-section-header">
+              <span class="plugins-section-title">Installed Plugins</span>
+            </div>
+            <div id="installed-plugins-list" class="plugins-list">
+              <div class="plugins-empty">No plugins installed yet.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="plugins-tab-content hidden" id="plugins-tab-marketplace">
+          <div class="plugins-section">
+            <div class="plugins-section-header">
+              <span class="plugins-section-title">Available Plugins</span>
+            </div>
+            <div class="plugins-marketplace-grid">
+              <div class="marketplace-item">
+                <div class="marketplace-icon">🎨</div>
+                <div class="marketplace-info">
+                  <div class="marketplace-name">Theme Pack</div>
+                  <div class="marketplace-desc">Additional zone and UI themes</div>
+                </div>
+                <button class="marketplace-btn">Install</button>
+              </div>
+              <div class="marketplace-item">
+                <div class="marketplace-icon">🔊</div>
+                <div class="marketplace-info">
+                  <div class="marketplace-name">Sound Pack</div>
+                  <div class="marketplace-desc">Extra sound effects and music</div>
+                </div>
+                <button class="marketplace-btn">Install</button>
+              </div>
+              <div class="marketplace-item">
+                <div class="marketplace-icon">🤖</div>
+                <div class="marketplace-info">
+                  <div class="marketplace-name">Character Pack</div>
+                  <div class="marketplace-desc">New character skins</div>
+                </div>
+                <button class="marketplace-btn">Install</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" class="modal-btn modal-btn-secondary" id="plugins-refresh">🔄 Refresh</button>
         </div>
       </div>
     </div>

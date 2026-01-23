@@ -13,11 +13,7 @@ import * as THREE from 'three'
 import type { StationType } from '../../shared/types'
 import type { WorkshopScene } from '../scene/WorkshopScene'
 import type { ICharacter, CharacterOptions, CharacterState } from './ICharacter'
-import {
-  IdleBehaviorManager,
-  WorkingBehaviorManager,
-  type CharacterParts,
-} from './animations'
+import { IdleBehaviorManager, WorkingBehaviorManager, type CharacterParts } from './animations'
 
 export type WizardOptions = CharacterOptions
 
@@ -62,6 +58,10 @@ export class Wizard implements ICharacter {
   private staffOrb: THREE.Mesh
   private magicParticles: THREE.Group
 
+  // Base positions for animation
+  private bodyBaseY = 0
+  private beardBaseY = 0
+
   // Behavior systems
   private idleBehaviorManager: IdleBehaviorManager
   private workingBehaviorManager: WorkingBehaviorManager
@@ -99,6 +99,10 @@ export class Wizard implements ICharacter {
     this.mesh.add(this.staff)
     this.mesh.add(this.magicParticles)
     this.mesh.add(this.statusRing)
+
+    // Store base positions for animation
+    this.bodyBaseY = this.body.position.y
+    this.beardBaseY = this.beard.position.y
 
     // Initialize behavior systems
     this.idleBehaviorManager = new IdleBehaviorManager()
@@ -227,11 +231,7 @@ export class Wizard implements ICharacter {
       const angle = (i / 5) * Math.PI * 2
       const height = 1.5 + Math.random() * 0.3
       const radius = 0.2 + Math.random() * 0.08
-      star.position.set(
-        Math.sin(angle) * radius,
-        height,
-        Math.cos(angle) * radius
-      )
+      star.position.set(Math.sin(angle) * radius, height, Math.cos(angle) * radius)
       star.rotation.set(Math.random(), Math.random(), Math.random())
       group.add(star)
     }
@@ -349,11 +349,7 @@ export class Wizard implements ICharacter {
       const angle = (i / 8) * Math.PI * 2
       const symbolGeo = new THREE.RingGeometry(0.02, 0.035, 6)
       const symbol = new THREE.Mesh(symbolGeo, symbolMat)
-      symbol.position.set(
-        Math.sin(angle) * 0.38,
-        0.05,
-        Math.cos(angle) * 0.38
-      )
+      symbol.position.set(Math.sin(angle) * 0.38, 0.05, Math.cos(angle) * 0.38)
       symbol.rotation.x = -Math.PI / 2
       group.add(symbol)
     }
@@ -422,11 +418,7 @@ export class Wizard implements ICharacter {
       const angle = (i / 4) * Math.PI * 2
       const prongGeo = new THREE.CylinderGeometry(0.015, 0.02, 0.15, 6)
       const prong = new THREE.Mesh(prongGeo, headMat)
-      prong.position.set(
-        Math.sin(angle) * 0.04,
-        1.45,
-        Math.cos(angle) * 0.04
-      )
+      prong.position.set(Math.sin(angle) * 0.04, 1.45, Math.cos(angle) * 0.04)
       prong.rotation.x = Math.sin(angle) * 0.4
       prong.rotation.z = Math.cos(angle) * 0.4
       group.add(prong)
@@ -549,7 +541,10 @@ export class Wizard implements ICharacter {
         // Dignified walking - robes sway, staff moves
         const sway = Math.sin(this.bobTime * 6) * 0.02
         this.body.rotation.y = sway
-        this.head.position.y = Math.sin(this.bobTime * 8) * 0.015
+
+        // Head bob (rotation only for walking)
+        this.head.rotation.x = Math.sin(this.bobTime * 8) * 0.03
+        this.hat.rotation.x = this.head.rotation.x * 0.5
 
         // Beard sways
         this.beard.rotation.z = Math.sin(this.bobTime * 6) * 0.05
@@ -569,10 +564,17 @@ export class Wizard implements ICharacter {
       }
     } else if (this.state === 'idle') {
       // Gentle breathing and presence
-      const breathe = Math.sin(this.bobTime * 1.5) * 0.01
-      this.body.position.y = breathe
-      this.head.position.y = breathe * 0.5
-      this.beard.position.y = breathe * 0.3
+      const breathe = Math.sin(this.bobTime * 1.5) * 0.015
+      this.body.position.y = this.bodyBaseY + breathe
+      this.beard.position.y = this.beardBaseY + breathe * 0.5
+
+      // Head subtle movement (rotation only, not position)
+      this.head.rotation.x = breathe * 0.3
+      this.head.rotation.z = Math.sin(this.bobTime * 0.8) * 0.02
+
+      // Hat follows head
+      this.hat.rotation.x = this.head.rotation.x * 0.5
+      this.hat.rotation.z = this.head.rotation.z
 
       // Hat stars twinkle
       this.hat.children.forEach((child, i) => {
@@ -682,19 +684,26 @@ export class Wizard implements ICharacter {
     if (state === 'working') {
       this.workingBehaviorManager.start(this.currentStation, parts)
     } else if (state === 'idle') {
+      // Reset all positions and rotations
       this.head.rotation.set(0, 0, 0)
+      this.hat.rotation.set(0, 0, 0)
+      this.body.position.y = this.bodyBaseY
+      this.body.rotation.set(0, 0, 0)
+      this.beard.position.y = this.beardBaseY
+      this.beard.rotation.set(0, 0, 0)
       this.leftArm.rotation.set(0, 0, 0)
       this.rightArm.rotation.set(-0.2, 0, -0.3)
+      this.staff.rotation.z = 0.15
       this.leftEye.position.y = 1.18
       this.rightEye.position.y = 1.18
     }
 
     // Update status ring color
     const colors = {
-      idle: 0x4ade80,    // green
+      idle: 0x4ade80, // green
       walking: 0x60a5fa, // blue
       working: 0xfb923c, // orange
-      thinking: 0xa78bfa // purple
+      thinking: 0xa78bfa, // purple
     }
     const ring = this.statusRing.material as THREE.MeshBasicMaterial
     ring.color.setHex(colors[state])

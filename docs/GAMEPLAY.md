@@ -41,6 +41,15 @@ The workshop is a 3D space where each Claude session gets its own **hexagonal zo
 | **Portal**    | Task                | Spinning portal for subagents            |
 | **Taskboard** | TodoWrite           | Sticky notes appearing                   |
 
+### Subagents
+
+When Claude spawns Task tools (subagents), mini-Claudes appear in the 3D scene:
+
+- **Zone-matched colors**: Subagents inherit their parent zone's color, getting slightly dimmer with depth
+- **Connection lines**: Dashed lines connect subagents to the zone center or their parent agent
+- **Hierarchy positioning**: Root subagents spiral out from zone center; nested subagents orbit their parent
+- **Size scaling**: Deeper nested subagents are smaller (60% base, decreasing with depth)
+
 ### Zone Status Colors
 
 Zone floors glow different colors to indicate status:

@@ -5,6 +5,7 @@
  * Supports parent-child relationships for nested Task tools.
  */
 
+import * as THREE from 'three'
 import type { WorkshopScene } from '../scene/WorkshopScene'
 import { Claude, type ClaudeOptions } from './Claude'
 
@@ -86,6 +87,10 @@ export interface Subagent {
   depth: number
   /** Role/template used */
   role?: SubagentRole
+  /** Connection line to zone center or parent */
+  connectionLine?: THREE.Line
+  /** Zone center position (for root-level connection lines) */
+  zoneCenter?: { x: number; z: number; y: number }
 }
 
 /** Hierarchy node for tree visualization */
@@ -108,15 +113,30 @@ const SUBAGENT_COLORS = [
 /** Maximum depth for subagent hierarchy */
 const MAX_DEPTH = 5
 
+/** Options for spawning a subagent with zone context */
+export interface SpawnOptions {
+  /** Zone color to inherit (subagent will match zone visually) */
+  zoneColor?: number
+  /** Zone position to spawn within */
+  zonePosition?: { x: number; z: number }
+  /** Zone elevation offset */
+  zoneElevation?: number
+}
+
 export class SubagentManager {
   private scene: WorkshopScene
   private subagents: Map<string, Subagent> = new Map()
   private colorIndex = 0
   /** Track the currently active toolUseId to determine parent-child relationships */
   private activeToolUseId: string | null = null
+  /** Callback for render loop (saved for cleanup) */
+  private updateCallback: (() => void) | null = null
 
   constructor(scene: WorkshopScene) {
     this.scene = scene
+    // Register for render updates to animate connection lines
+    this.updateCallback = () => this.updateConnectionLines()
+    scene.onRender(this.updateCallback)
   }
 
   /**
@@ -140,12 +160,14 @@ export class SubagentManager {
    * @param description - Task description
    * @param role - Optional role template
    * @param parentToolUseId - Optional parent (for nested Tasks)
+   * @param options - Zone context for positioning and styling
    */
   spawn(
     toolUseId: string,
     description?: string,
     role?: SubagentRole,
-    parentToolUseId?: string
+    parentToolUseId?: string,
+    options?: SpawnOptions
   ): Subagent {
     // Don't spawn duplicates
     if (this.subagents.has(toolUseId)) {
@@ -159,36 +181,44 @@ export class SubagentManager {
     // Calculate depth
     const depth = parent ? Math.min(parent.depth + 1, MAX_DEPTH) : 0
 
-    // Get color from role template or cycle through colors
+    // Get color: prefer zone color, fall back to role template, then cycle through defaults
     let color: number
-    if (role) {
+    if (options?.zoneColor !== undefined) {
+      // Use zone color with slight brightness variation based on depth
+      // Deeper subagents get slightly dimmer to show hierarchy
+      color = this.adjustColorBrightness(options.zoneColor, 1 - depth * 0.1)
+    } else if (role) {
       const template = SUBAGENT_TEMPLATES.find((t) => t.id === role)
       color = template?.color ?? SUBAGENT_COLORS[this.colorIndex % SUBAGENT_COLORS.length]
+      this.colorIndex++
     } else {
       color = SUBAGENT_COLORS[this.colorIndex % SUBAGENT_COLORS.length]
+      this.colorIndex++
     }
-    this.colorIndex++
 
     // Scale gets smaller with depth
     const baseScale = 0.6
     const depthScale = Math.max(0.3, baseScale - depth * 0.08)
 
-    // Create mini-Claude at portal station (or near parent)
-    const options: ClaudeOptions = {
+    // Create mini-Claude - position will be set after based on zone context
+    const claudeOptions: ClaudeOptions = {
       scale: depthScale,
       color: color,
       statusColor: color,
-      startStation: 'portal',
+      startStation: 'portal', // Default, will be overridden if zone position provided
     }
 
-    const claude = new Claude(this.scene, options)
+    const claude = new Claude(this.scene, claudeOptions)
     claude.setState('thinking')
 
-    // Position based on hierarchy
+    // Position based on zone context and hierarchy
+    const hasZonePosition = options?.zonePosition !== undefined
+    const zoneElevation = options?.zoneElevation ?? 0
+
     if (parent) {
-      // Children orbit around parent
+      // Children orbit around parent (regardless of zone)
       const siblingIndex = parent.childToolUseIds.length
-      const orbitRadius = 1.5 + depth * 0.3
+      const orbitRadius = 1.2 + depth * 0.25
       const angleOffset =
         (siblingIndex / Math.max(1, parent.childToolUseIds.length + 1)) * Math.PI * 2
       const angle = angleOffset + Math.PI / 4
@@ -196,14 +226,38 @@ export class SubagentManager {
       const parentPos = parent.claude.mesh.position
       claude.mesh.position.x = parentPos.x + Math.sin(angle) * orbitRadius
       claude.mesh.position.z = parentPos.z + Math.cos(angle) * orbitRadius
+      claude.mesh.position.y = parentPos.y // Match parent elevation
+    } else if (hasZonePosition) {
+      // Root level subagents spawn within their zone
+      const zonePos = options!.zonePosition!
+      const rootCount = this.getRootSubagents().length
+
+      // Spiral outward from zone center, staying within zone radius (~5.5 units)
+      const spiralAngle = rootCount * Math.PI * 0.6 // Golden angle-ish spacing
+      const spiralRadius = 1.5 + rootCount * 0.4 // Start near center, expand outward
+      const clampedRadius = Math.min(spiralRadius, 4.5) // Stay within zone bounds
+
+      claude.mesh.position.x = zonePos.x + Math.sin(spiralAngle) * clampedRadius
+      claude.mesh.position.z = zonePos.z + Math.cos(spiralAngle) * clampedRadius
+      claude.mesh.position.y = zoneElevation // Match zone elevation
     } else {
-      // Root level subagents fan out from portal
+      // Fallback: fan out from portal (legacy behavior)
       const rootCount = this.getRootSubagents().length
       const offset = rootCount * 0.8
       const angle = rootCount * Math.PI * 0.3
       claude.mesh.position.x += Math.sin(angle) * offset
       claude.mesh.position.z += Math.cos(angle) * offset
     }
+
+    // Create connection line from subagent to zone center or parent
+    const connectionLine = this.createConnectionLine(
+      claude.mesh.position,
+      parent?.claude.mesh.position ??
+        (hasZonePosition
+          ? new THREE.Vector3(options!.zonePosition!.x, zoneElevation, options!.zonePosition!.z)
+          : null),
+      color
+    )
 
     const subagent: Subagent = {
       id: claude.id,
@@ -215,6 +269,10 @@ export class SubagentManager {
       childToolUseIds: [],
       depth,
       role,
+      connectionLine: connectionLine ?? undefined,
+      zoneCenter: hasZonePosition
+        ? { x: options!.zonePosition!.x, z: options!.zonePosition!.z, y: zoneElevation }
+        : undefined,
     }
 
     // Register as child of parent
@@ -224,11 +282,107 @@ export class SubagentManager {
 
     this.subagents.set(toolUseId, subagent)
     console.log(
-      `Subagent spawned: ${toolUseId} (depth: ${depth}, parent: ${actualParent ?? 'none'})`,
+      `Subagent spawned: ${toolUseId} (depth: ${depth}, parent: ${actualParent ?? 'none'}, zoneColor: ${options?.zoneColor?.toString(16)})`,
       description
     )
 
     return subagent
+  }
+
+  /**
+   * Adjust color brightness for hierarchy depth variation
+   * @param color - Base color as hex number
+   * @param factor - Brightness multiplier (0.0-1.0+)
+   */
+  private adjustColorBrightness(color: number, factor: number): number {
+    const r = Math.min(255, Math.floor(((color >> 16) & 0xff) * factor))
+    const g = Math.min(255, Math.floor(((color >> 8) & 0xff) * factor))
+    const b = Math.min(255, Math.floor((color & 0xff) * factor))
+    return (r << 16) | (g << 8) | b
+  }
+
+  /**
+   * Create a glowing connection line from subagent to target (zone center or parent)
+   * @param from - Subagent position
+   * @param to - Target position (zone center or parent position), null if no connection needed
+   * @param color - Line color (matches subagent/zone color)
+   */
+  private createConnectionLine(
+    from: THREE.Vector3,
+    to: THREE.Vector3 | null,
+    color: number
+  ): THREE.Line | null {
+    if (!to) return null
+
+    // Create geometry with two points (will be updated each frame)
+    const geometry = new THREE.BufferGeometry()
+    const positions = new Float32Array(6) // 2 points * 3 coords
+    positions[0] = from.x
+    positions[1] = from.y + 0.5 // Slight offset so line doesn't clip floor
+    positions[2] = from.z
+    positions[3] = to.x
+    positions[4] = to.y + 0.1 // Lower at center
+    positions[5] = to.z
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+
+    // Create glowing dashed line material
+    const material = new THREE.LineDashedMaterial({
+      color: color,
+      transparent: true,
+      opacity: 0.4,
+      dashSize: 0.3,
+      gapSize: 0.2,
+      linewidth: 2,
+    })
+
+    const line = new THREE.Line(geometry, material)
+    line.computeLineDistances() // Required for dashed lines
+    this.scene.scene.add(line)
+
+    return line
+  }
+
+  /**
+   * Update connection line positions (call each frame for smooth animation)
+   */
+  updateConnectionLines(): void {
+    for (const subagent of this.subagents.values()) {
+      if (!subagent.connectionLine) continue
+
+      const positions = subagent.connectionLine.geometry.attributes
+        .position as THREE.BufferAttribute
+
+      // Update 'from' position (subagent)
+      positions.setXYZ(
+        0,
+        subagent.claude.mesh.position.x,
+        subagent.claude.mesh.position.y + 0.5,
+        subagent.claude.mesh.position.z
+      )
+
+      // Update 'to' position (parent or zone center)
+      if (subagent.parentToolUseId) {
+        const parent = this.subagents.get(subagent.parentToolUseId)
+        if (parent) {
+          positions.setXYZ(
+            1,
+            parent.claude.mesh.position.x,
+            parent.claude.mesh.position.y + 0.5,
+            parent.claude.mesh.position.z
+          )
+        }
+      } else if (subagent.zoneCenter) {
+        positions.setXYZ(
+          1,
+          subagent.zoneCenter.x,
+          subagent.zoneCenter.y + 0.1,
+          subagent.zoneCenter.z
+        )
+      }
+
+      positions.needsUpdate = true
+      subagent.connectionLine.computeLineDistances()
+    }
   }
 
   /**
@@ -350,7 +504,14 @@ export class SubagentManager {
       }
     }
 
-    // Clean up
+    // Clean up connection line
+    if (subagent.connectionLine) {
+      this.scene.scene.remove(subagent.connectionLine)
+      subagent.connectionLine.geometry.dispose()
+      ;(subagent.connectionLine.material as THREE.Material).dispose()
+    }
+
+    // Clean up claude
     subagent.claude.dispose()
     this.subagents.delete(toolUseId)
     console.log(`Subagent removed: ${toolUseId} (depth: ${subagent.depth})`)
@@ -431,7 +592,19 @@ export class SubagentManager {
    * Clean up all subagents
    */
   dispose(): void {
+    // Unregister from render loop
+    if (this.updateCallback) {
+      this.scene.offRender(this.updateCallback)
+      this.updateCallback = null
+    }
+
     for (const subagent of this.subagents.values()) {
+      // Clean up connection line
+      if (subagent.connectionLine) {
+        this.scene.scene.remove(subagent.connectionLine)
+        subagent.connectionLine.geometry.dispose()
+        ;(subagent.connectionLine.material as THREE.Material).dispose()
+      }
       subagent.claude.dispose()
     }
     this.subagents.clear()

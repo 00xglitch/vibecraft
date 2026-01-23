@@ -265,13 +265,15 @@ export const STATION_ANIMATIONS: StationAnimations = {
 
 ### `src/entities/SubagentManager.ts`
 
-Manages subagent visualizations:
+Manages subagent visualizations with zone-aware positioning:
 
-- `spawn(toolUseId, description)` - Creates mini-Claude at portal when Task starts
+- `spawn(toolUseId, description, role?, parentToolUseId?, options?)` - Creates mini-Claude in zone
 - `remove(toolUseId)` - Removes subagent when Task completes
-- Subagents are 60% scale, different colors (blue, emerald, pink, purple, amber, cyan)
-- Positioned in a fan pattern around the portal to avoid overlap
-- Tracks count for stats display
+- **Zone context**: Subagents inherit zone color (with depth-based dimming) and position
+- **Visual hierarchy**: Connection lines link subagents to zone center or parent agent
+- **Spiral positioning**: Root subagents spiral outward from zone center, staying within bounds
+- **Depth scaling**: Deeper nested subagents are smaller (60% base, -8% per depth level)
+- Role templates: researcher, coder, reviewer, tester, explorer, custom
 
 ### `src/scene/ZoneNotifications.ts`
 
@@ -355,6 +357,55 @@ Tool permission request UI:
 - Number key shortcuts (1-9) to select options
 - No escape/click-outside close (user must choose)
 - Manages zone attention and attention queue
+
+### `src/systems/AchievementSystem.ts`
+
+Achievement tracking and rewards system:
+
+- 25+ achievements across 4 categories: tools, sessions, milestones, special
+- Points system with total score tracking
+- Progress tracking for multi-step achievements
+- Secret achievements hidden until unlocked
+- localStorage persistence
+- Event-based unlock notifications
+
+```typescript
+import { achievementSystem } from './systems/AchievementSystem'
+
+// Track events
+achievementSystem.trackToolUse('Read') // Tool usage
+achievementSystem.trackSessionCreated() // Session creation
+achievementSystem.trackActiveZones(3) // Active zone count
+achievementSystem.trackGitCommit() // Git commits
+achievementSystem.trackTokens(1000) // Token usage
+achievementSystem.trackCharacterSelected('wizard') // Character selection
+
+// Query state
+achievementSystem.getTotalPoints() // Total earned points
+achievementSystem.getAllAchievements() // All achievements with progress
+achievementSystem.getUnlockedAchievements() // Only unlocked
+
+// Subscribe to unlocks
+achievementSystem.onUnlock((achievement) => {
+  console.log(`Unlocked: ${achievement.name}`)
+})
+```
+
+### `src/ui/AchievementsModal.ts`
+
+Achievement display and toast notifications:
+
+- Modal with category tabs (All, Tools, Sessions, Milestones, Special)
+- Stats display (points, unlocked count, completion %)
+- Progress bars for locked achievements
+- Toast notifications when achievements unlock
+
+```typescript
+import { showAchievementsModal, initAchievementNotifications } from './ui/AchievementsModal'
+
+initAchievementNotifications() // Set up unlock toasts
+showAchievementsModal() // Open the achievements panel
+```
 
 ### `src/ui/DrawMode.ts`
 
@@ -716,6 +767,10 @@ Client rebuilds its local `claudeToManagedLink` map from server data on every `s
 - **Improved session liveness**: Health checks verify Claude is actually running in tmux pane, not just that session exists
 - **File change rollback**: Track Edit/Write changes with ability to rollback via API (`/api/changes`)
 - **Google Jules integration**: Async coding agent that creates PRs (`/api/jules/*`)
+- **Achievement system**: 25+ unlockable achievements with progress tracking, toast notifications, and points
+- **Loading spinner**: Inline CSS loader shown immediately while app initializes
+- **Character personalities**: AfroSamurai with speech bubbles and contextual phrases
+- **Improved character animations**: Wizard animation fixes, base position tracking
 
 ## Sound System
 
