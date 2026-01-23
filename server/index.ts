@@ -561,10 +561,14 @@ function parseTokensFromOutput(output: string): number | null {
   // - "Input: 1,234 | Output: 567" (newer)
   // - "Tokens: 12.5k" (compact)
   // - "⚡ 879 tokens" (with emoji)
+  // - "Input: 1234 tokens, Output: 5678 tokens" (verbose)
+  // - "1234/5678 tokens" (compact ratio)
   const patterns = [
     /(?:↓|⚡)\s*([0-9,]+)\s*tokens?/gi, // ↓ 879 tokens, ⚡ 1,234 tokens
     /(?:↓|⚡)\s*([0-9.]+)k\s*tokens?/gi, // ↓ 12.5k tokens, ⚡ 12k tokens
     /(?:Input|Output):\s*([0-9,]+)/gi, // Input: 1,234 | Output: 567
+    /Input:\s*([0-9,]+)\s*tokens?,?\s*Output:\s*([0-9,]+)\s*tokens?/gi, // Input: 1234 tokens, Output: 5678 tokens
+    /([0-9,]+)\/([0-9,]+)\s*tokens?/gi, // 1234/5678 tokens
     /Tokens?:\s*([0-9,]+)/gi, // Tokens: 879
     /Tokens?:\s*([0-9.]+)k/gi, // Tokens: 12.5k
     /\[([0-9,]+)\s*tokens?\]/gi, // [879 tokens]
@@ -579,12 +583,21 @@ function parseTokensFromOutput(output: string): number | null {
     for (const match of matches) {
       let num = 0
       const value = match[1]
+      const value2 = match[2] // For patterns with 2 capture groups (input/output)
 
       // Handle 'k' suffix (thousands)
       if (value.includes('.') && pattern.source.includes('k')) {
         num = Math.round(parseFloat(value) * 1000)
       } else {
         num = parseInt(value.replace(/,/g, ''), 10)
+      }
+
+      // If there's a second capture group, add it (input + output)
+      if (value2) {
+        const num2 = parseInt(value2.replace(/,/g, ''), 10)
+        if (!isNaN(num2)) {
+          num += num2
+        }
       }
 
       if (!isNaN(num) && num > maxTokens) {
@@ -622,12 +635,30 @@ function pollTokens(tmuxSession: string): void {
         return
       }
 
+      // Debug: Log output details
+      if (DEBUG) {
+        debug(`[Token Debug] Session ${tmuxSession}:`, {
+          outputLength: stdout.length,
+          outputPreview: stdout.slice(-200),
+        })
+      }
+
       // Simple hash to detect changes (per-session to avoid collision between sessions)
       const hash = stdout.slice(-500)
       if (hash === sessionTmuxHash.get(tmuxSession)) return
       sessionTmuxHash.set(tmuxSession, hash)
 
       const tokens = parseTokensFromOutput(stdout)
+
+      // Debug: Log parsed result
+      if (DEBUG) {
+        if (tokens) {
+          debug(`[Token Debug] Parsed ${tokens} tokens from ${tmuxSession}`)
+        } else {
+          debug(`[Token Debug] No tokens parsed from ${tmuxSession}`)
+        }
+      }
+
       if (tokens === null) return
 
       // Update session tokens (use TMUX_SESSION as session ID for now)
@@ -675,17 +706,27 @@ function pollTokens(tmuxSession: string): void {
 function startTokenPolling(): void {
   // Poll every 2 seconds - poll all managed sessions
   setInterval(() => {
+    const polledSessions: string[] = []
     for (const session of managedSessions.values()) {
-      // Skip implicit sessions and OpenCode sessions - they don't have tmux to poll
-      if (isImplicitSession(session)) continue
+      // Skip OpenCode sessions - they don't have tmux to poll
+      // Note: We DO poll external/implicit sessions if they have tmux
       if (session.sessionType === 'opencode') continue
       if (session.status !== 'offline' && session.tmuxSession) {
+        polledSessions.push(`${session.name}(${session.tmuxSession})`)
         pollTokens(session.tmuxSession)
       }
     }
     // Also poll the default session for backwards compatibility
     if (!managedSessions.size) {
+      polledSessions.push(`default(${TMUX_SESSION})`)
       pollTokens(TMUX_SESSION)
+    }
+
+    // Debug: Show which sessions were polled
+    if (DEBUG && polledSessions.length > 0) {
+      debug(
+        `[Token Debug] Polling ${polledSessions.length} session(s): ${polledSessions.join(', ')}`
+      )
     }
   }, 2000)
   log(`Token polling started`)
@@ -937,8 +978,8 @@ function startPermissionPolling(): void {
   // Poll every 1 second (more frequent than tokens since permissions are time-sensitive)
   setInterval(() => {
     for (const session of managedSessions.values()) {
-      // Skip implicit sessions and OpenCode sessions - they don't have tmux to poll
-      if (isImplicitSession(session)) continue
+      // Skip OpenCode sessions - they don't have tmux to poll
+      // Note: We DO poll external/implicit sessions if they have tmux
       if (session.sessionType === 'opencode') continue
       if (session.status !== 'offline' && session.tmuxSession) {
         pollPermissions(session.id, session.tmuxSession)

@@ -161,9 +161,9 @@ export class Wizard implements ICharacter {
     // Eyes - wise and knowing (made larger and more prominent)
     const eyeGeo = new THREE.SphereGeometry(0.06, 12, 12) // Increased from 0.04 to 0.06
     const eyeMat = new THREE.MeshStandardMaterial({
-      color: 0x4169e1, // Royal blue - magical eyes
-      emissive: 0x1a1aff,
-      emissiveIntensity: 0.5, // Increased glow
+      color: 0x9d4edd, // Mystical purple - magical eyes
+      emissive: 0x7b2cbf, // Deep purple glow
+      emissiveIntensity: 0.6, // Increased glow for mystical effect
     })
 
     const leftEye = new THREE.Mesh(eyeGeo, eyeMat)
