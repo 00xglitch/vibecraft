@@ -87,6 +87,30 @@ class PluginManager {
   }
 
   /**
+   * Register a plugin without triggering render
+   * (for modal-based plugins that render themselves)
+   */
+  registerWithoutRender(plugin: Plugin): void {
+    this.plugins.set(plugin.id, plugin)
+
+    // Load or create config
+    let config = this.configs.get(plugin.id)
+    if (!config) {
+      config = { id: plugin.id, enabled: plugin.enabled }
+      this.configs.set(plugin.id, config)
+    }
+
+    // Apply saved enabled state
+    plugin.enabled = config.enabled
+
+    // Activate if enabled
+    if (plugin.enabled) {
+      plugin.onActivate?.()
+    }
+    // Note: No renderPluginPanel() call
+  }
+
+  /**
    * Unregister a plugin
    */
   unregister(pluginId: string): void {

@@ -517,3 +517,95 @@
   background: rgba(139, 92, 246, 0.25);
   border-color: rgba(139, 92, 246, 0.5);
 }
+
+/* =============================================================================
+   Session Settings (Model, Thinking in Modal)
+   ============================================================================= */
+
+.session-settings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.session-setting-item {
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px solid rgba(100, 116, 139, 0.2);
+  border-radius: 8px;
+  overflow: hidden;
+  transition: all 0.15s ease;
+}
+
+.session-setting-item:hover {
+  border-color: rgba(100, 116, 139, 0.4);
+}
+
+.session-setting-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: rgba(15, 23, 42, 0.4);
+  border-bottom: 1px solid rgba(100, 116, 139, 0.15);
+}
+
+.session-setting-icon {
+  font-size: 18px;
+  width: 24px;
+  text-align: center;
+}
+
+.session-setting-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.session-setting-content {
+  padding: 12px;
+}
+
+/* Override plugin styles inside session settings */
+.session-setting-content .model-selector,
+.session-setting-content .thinking-toggle {
+  display: flex;
+  align-items: center;
+}
+
+.session-setting-content .model-select {
+  width: 100%;
+  padding: 8px 12px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(100, 116, 139, 0.3);
+  border-radius: 6px;
+  color: #e2e8f0;
+  font-size: 13px;
+}
+
+.session-setting-content .model-select:focus {
+  border-color: #8b5cf6;
+  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.2);
+}
+
+.session-setting-content .thinking-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: #94a3b8;
+  cursor: pointer;
+}
+
+.session-setting-content .thinking-checkbox {
+  width: 18px;
+  height: 18px;
+  accent-color: #8b5cf6;
+}
+
+.session-setting-content .thinking-text {
+  color: #94a3b8;
+}
+
+.session-setting-content .thinking-checkbox:checked + .thinking-text {
+  color: #a78bfa;
+}

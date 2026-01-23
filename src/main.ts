@@ -67,7 +67,7 @@ import { smartSuggestions } from './ui/SmartSuggestions'
 import { createSessionAPI, type SessionAPI } from './api'
 import { replayController, ReplaySceneManager, type SceneSnapshot } from './replay'
 import { setupReplayControls, type ReplayControls } from './ui/ReplayControls'
-import { initializePlugins, pluginManager } from './plugins'
+import { initializePluginsInModal, pluginManager } from './plugins'
 import { achievementSystem } from './systems/AchievementSystem'
 import { showAchievementsModal, initAchievementNotifications } from './ui/AchievementsModal'
 
@@ -3554,13 +3554,6 @@ function updateMcpServersList(): void {
   if (countEl) countEl.textContent = String(mcpRegistry.size)
 }
 
-// Helper to escape HTML
-function escapeHtml(text: string): string {
-  const div = document.createElement('div')
-  div.textContent = text
-  return div.innerHTML
-}
-
 // ============================================================================
 // Help Button
 // ============================================================================
@@ -3903,29 +3896,26 @@ function init() {
   // Register EventBus handlers (decoupled event handling)
   registerAllHandlers()
 
-  // Initialize plugin system
-  const pluginContainer = document.getElementById('plugin-container')
-  if (pluginContainer) {
-    initializePlugins(pluginContainer)
+  // Initialize plugin system (now renders into Plugins modal tabs)
+  initializePluginsInModal()
 
-    // Listen for plugin events
-    pluginManager.getContext().on('model:change', ({ model }) => {
-      console.log('Plugin: Model changed to', model)
-      // Store selected model for new sessions
-      localStorage.setItem('vibecraft:default-model', model)
-    })
+  // Listen for plugin events
+  pluginManager.getContext().on('model:change', ({ model }) => {
+    console.log('Plugin: Model changed to', model)
+    // Store selected model for new sessions
+    localStorage.setItem('vibecraft:default-model', model)
+  })
 
-    pluginManager.getContext().on('thinking:toggle', ({ enabled }) => {
-      console.log('Plugin: Thinking mode', enabled ? 'enabled' : 'disabled')
-      // Store thinking preference for new sessions
-      localStorage.setItem('vibecraft:thinking-enabled', String(enabled))
-    })
+  pluginManager.getContext().on('thinking:toggle', ({ enabled }) => {
+    console.log('Plugin: Thinking mode', enabled ? 'enabled' : 'disabled')
+    // Store thinking preference for new sessions
+    localStorage.setItem('vibecraft:thinking-enabled', String(enabled))
+  })
 
-    pluginManager.getContext().on('mcp:select', ({ server }) => {
-      console.log('Plugin: MCP server selected', server)
-      // Could filter activity feed by MCP server here
-    })
-  }
+  pluginManager.getContext().on('mcp:select', ({ server }) => {
+    console.log('Plugin: MCP server selected', server)
+    // Could filter activity feed by MCP server here
+  })
 
   // Configure commit celebration handlers (confetti + achievement toast)
   configureCommitHandlers({

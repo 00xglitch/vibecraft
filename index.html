@@ -257,8 +257,8 @@
           </div>
         </div>
 
-        <!-- Plugin Panel -->
-        <div id="plugin-container"></div>
+        <!-- Plugin Panel - hidden, moved to Plugins modal -->
+        <div id="plugin-container" style="display: none;"></div>
 
         <!-- Terminal output panel (hidden by default) -->
         <div id="terminal-panel" class="hidden">
@@ -494,12 +494,25 @@
         </div>
 
         <div class="plugins-tabs">
-          <button class="plugins-tab active" data-tab="mcp">MCP Servers</button>
+          <button class="plugins-tab active" data-tab="session">Session</button>
+          <button class="plugins-tab" data-tab="mcp">MCP Servers</button>
           <button class="plugins-tab" data-tab="plugins">Plugins</button>
           <button class="plugins-tab" data-tab="marketplace">Marketplace</button>
         </div>
 
-        <div class="plugins-tab-content" id="plugins-tab-mcp">
+        <!-- Session Settings Tab (Model, Thinking) -->
+        <div class="plugins-tab-content" id="plugins-tab-session">
+          <div class="plugins-section">
+            <div class="plugins-section-header">
+              <span class="plugins-section-title">Session Settings</span>
+            </div>
+            <div id="session-settings-container" class="session-settings-list">
+              <!-- Model selector and Thinking toggle will be rendered here -->
+            </div>
+          </div>
+        </div>
+
+        <div class="plugins-tab-content hidden" id="plugins-tab-mcp">
           <div class="plugins-section">
             <div class="plugins-section-header">
               <span class="plugins-section-title">Active MCP Servers</span>
