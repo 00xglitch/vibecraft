@@ -8,6 +8,8 @@
  * - Special events (git commits, etc.)
  */
 
+export type AchievementRarity = 'common' | 'rare' | 'epic' | 'legendary'
+
 export interface Achievement {
   id: string
   name: string
@@ -16,7 +18,19 @@ export interface Achievement {
   category: 'tools' | 'sessions' | 'milestones' | 'special'
   requirement: number // How many times/count needed
   points: number // Points earned
+  rarity: AchievementRarity // Visual tier
   secret?: boolean // Hidden until earned
+}
+
+// Rarity color and glow configurations
+export const RARITY_CONFIG: Record<
+  AchievementRarity,
+  { color: string; glow: string; label: string }
+> = {
+  common: { color: '#9ca3af', glow: 'rgba(156, 163, 175, 0.3)', label: 'Common' },
+  rare: { color: '#3b82f6', glow: 'rgba(59, 130, 246, 0.4)', label: 'Rare' },
+  epic: { color: '#a855f7', glow: 'rgba(168, 85, 247, 0.5)', label: 'Epic' },
+  legendary: { color: '#f59e0b', glow: 'rgba(245, 158, 11, 0.6)', label: 'Legendary' },
 }
 
 export interface UserProgress {
@@ -31,7 +45,7 @@ export interface UserProgress {
   totalPoints: number
 }
 
-// Achievement definitions
+// Achievement definitions with rarity tiers
 export const ACHIEVEMENTS: Achievement[] = [
   // Tools category
   {
@@ -42,6 +56,7 @@ export const ACHIEVEMENTS: Achievement[] = [
     category: 'tools',
     requirement: 1,
     points: 10,
+    rarity: 'common',
   },
   {
     id: 'read_master',
@@ -51,6 +66,7 @@ export const ACHIEVEMENTS: Achievement[] = [
     category: 'tools',
     requirement: 100,
     points: 50,
+    rarity: 'rare',
   },
   {
     id: 'first_edit',
@@ -60,6 +76,7 @@ export const ACHIEVEMENTS: Achievement[] = [
     category: 'tools',
     requirement: 1,
     points: 10,
+    rarity: 'common',
   },
   {
     id: 'edit_master',
@@ -69,6 +86,7 @@ export const ACHIEVEMENTS: Achievement[] = [
     category: 'tools',
     requirement: 100,
     points: 50,
+    rarity: 'rare',
   },
   {
     id: 'first_bash',
@@ -78,6 +96,7 @@ export const ACHIEVEMENTS: Achievement[] = [
     category: 'tools',
     requirement: 1,
     points: 10,
+    rarity: 'common',
   },
   {
     id: 'bash_master',
@@ -87,6 +106,7 @@ export const ACHIEVEMENTS: Achievement[] = [
     category: 'tools',
     requirement: 100,
     points: 50,
+    rarity: 'rare',
   },
   {
     id: 'first_search',
@@ -96,6 +116,7 @@ export const ACHIEVEMENTS: Achievement[] = [
     category: 'tools',
     requirement: 1,
     points: 10,
+    rarity: 'common',
   },
   {
     id: 'web_explorer',
@@ -105,6 +126,7 @@ export const ACHIEVEMENTS: Achievement[] = [
     category: 'tools',
     requirement: 1,
     points: 10,
+    rarity: 'common',
   },
   {
     id: 'subagent_spawner',
@@ -114,6 +136,7 @@ export const ACHIEVEMENTS: Achievement[] = [
     category: 'tools',
     requirement: 10,
     points: 30,
+    rarity: 'rare',
   },
   {
     id: 'tool_variety',
@@ -123,6 +146,27 @@ export const ACHIEVEMENTS: Achievement[] = [
     category: 'tools',
     requirement: 5,
     points: 25,
+    rarity: 'rare',
+  },
+  {
+    id: 'read_legend',
+    name: 'Library Keeper',
+    description: 'Use the Read tool 500 times',
+    icon: '📜',
+    category: 'tools',
+    requirement: 500,
+    points: 100,
+    rarity: 'epic',
+  },
+  {
+    id: 'edit_legend',
+    name: 'Code Sculptor',
+    description: 'Use the Edit tool 500 times',
+    icon: '⚒️',
+    category: 'tools',
+    requirement: 500,
+    points: 100,
+    rarity: 'epic',
   },
 
   // Sessions category
@@ -134,6 +178,7 @@ export const ACHIEVEMENTS: Achievement[] = [
     category: 'sessions',
     requirement: 1,
     points: 10,
+    rarity: 'common',
   },
   {
     id: 'session_veteran',
@@ -143,6 +188,7 @@ export const ACHIEVEMENTS: Achievement[] = [
     category: 'sessions',
     requirement: 10,
     points: 30,
+    rarity: 'rare',
   },
   {
     id: 'multi_zone',
@@ -152,6 +198,27 @@ export const ACHIEVEMENTS: Achievement[] = [
     category: 'sessions',
     requirement: 3,
     points: 25,
+    rarity: 'rare',
+  },
+  {
+    id: 'session_commander',
+    name: 'Session Commander',
+    description: 'Create 50 sessions',
+    icon: '👑',
+    category: 'sessions',
+    requirement: 50,
+    points: 75,
+    rarity: 'epic',
+  },
+  {
+    id: 'zone_overlord',
+    name: 'Zone Overlord',
+    description: 'Have 6 active zones at once',
+    icon: '🏛️',
+    category: 'sessions',
+    requirement: 6,
+    points: 100,
+    rarity: 'legendary',
   },
 
   // Milestones category
@@ -163,6 +230,7 @@ export const ACHIEVEMENTS: Achievement[] = [
     category: 'milestones',
     requirement: 1000,
     points: 15,
+    rarity: 'common',
   },
   {
     id: 'token_ten_k',
@@ -172,6 +240,7 @@ export const ACHIEVEMENTS: Achievement[] = [
     category: 'milestones',
     requirement: 10000,
     points: 30,
+    rarity: 'rare',
   },
   {
     id: 'token_hundred_k',
@@ -181,6 +250,17 @@ export const ACHIEVEMENTS: Achievement[] = [
     category: 'milestones',
     requirement: 100000,
     points: 100,
+    rarity: 'epic',
+  },
+  {
+    id: 'token_million',
+    name: 'Token Titan',
+    description: 'Use 1,000,000 tokens',
+    icon: '💎',
+    category: 'milestones',
+    requirement: 1000000,
+    points: 250,
+    rarity: 'legendary',
   },
   {
     id: 'tool_century',
@@ -190,6 +270,7 @@ export const ACHIEVEMENTS: Achievement[] = [
     category: 'milestones',
     requirement: 100,
     points: 25,
+    rarity: 'common',
   },
   {
     id: 'tool_thousand',
@@ -199,6 +280,17 @@ export const ACHIEVEMENTS: Achievement[] = [
     category: 'milestones',
     requirement: 1000,
     points: 75,
+    rarity: 'rare',
+  },
+  {
+    id: 'tool_legend',
+    name: 'Tool Legend',
+    description: 'Use tools 10,000 times total',
+    icon: '🌌',
+    category: 'milestones',
+    requirement: 10000,
+    points: 200,
+    rarity: 'legendary',
   },
 
   // Special category
@@ -210,6 +302,7 @@ export const ACHIEVEMENTS: Achievement[] = [
     category: 'special',
     requirement: 1,
     points: 20,
+    rarity: 'common',
   },
   {
     id: 'commit_streak',
@@ -219,6 +312,17 @@ export const ACHIEVEMENTS: Achievement[] = [
     category: 'special',
     requirement: 10,
     points: 40,
+    rarity: 'rare',
+  },
+  {
+    id: 'commit_legend',
+    name: 'Commit Legend',
+    description: 'Make 100 git commits',
+    icon: '⚡',
+    category: 'special',
+    requirement: 100,
+    points: 150,
+    rarity: 'legendary',
   },
   {
     id: 'night_owl',
@@ -228,6 +332,7 @@ export const ACHIEVEMENTS: Achievement[] = [
     category: 'special',
     requirement: 1,
     points: 15,
+    rarity: 'rare',
     secret: true,
   },
   {
@@ -238,6 +343,7 @@ export const ACHIEVEMENTS: Achievement[] = [
     category: 'special',
     requirement: 1,
     points: 15,
+    rarity: 'rare',
     secret: true,
   },
   {
@@ -248,6 +354,7 @@ export const ACHIEVEMENTS: Achievement[] = [
     category: 'special',
     requirement: 1,
     points: 10,
+    rarity: 'epic',
     secret: true,
   },
   {
@@ -258,6 +365,18 @@ export const ACHIEVEMENTS: Achievement[] = [
     category: 'special',
     requirement: 1,
     points: 10,
+    rarity: 'epic',
+    secret: true,
+  },
+  {
+    id: 'completionist',
+    name: 'Completionist',
+    description: 'Unlock all non-secret achievements',
+    icon: '🎖️',
+    category: 'special',
+    requirement: 1,
+    points: 500,
+    rarity: 'legendary',
     secret: true,
   },
 ]
@@ -312,16 +431,19 @@ export class AchievementSystem {
 
     // Check tool-specific achievements
     const toolLower = toolName.toLowerCase()
+    const toolCount = this.progress.stats.toolCounts[toolName]
 
     if (toolLower === 'read') {
       this.checkAndUnlock('first_read', 1)
-      this.checkAndUnlock('read_master', this.progress.stats.toolCounts[toolName])
+      this.checkAndUnlock('read_master', toolCount)
+      this.checkAndUnlock('read_legend', toolCount)
     } else if (toolLower === 'edit') {
       this.checkAndUnlock('first_edit', 1)
-      this.checkAndUnlock('edit_master', this.progress.stats.toolCounts[toolName])
+      this.checkAndUnlock('edit_master', toolCount)
+      this.checkAndUnlock('edit_legend', toolCount)
     } else if (toolLower === 'bash') {
       this.checkAndUnlock('first_bash', 1)
-      this.checkAndUnlock('bash_master', this.progress.stats.toolCounts[toolName])
+      this.checkAndUnlock('bash_master', toolCount)
     } else if (toolLower === 'grep' || toolLower === 'glob') {
       this.checkAndUnlock('first_search', 1)
     } else if (toolLower === 'webfetch' || toolLower === 'websearch') {
@@ -335,9 +457,13 @@ export class AchievementSystem {
     const uniqueTools = Object.keys(this.progress.stats.toolCounts).length
     this.checkAndUnlock('tool_variety', uniqueTools)
 
-    // Check total tool achievements
+    // Check total tool achievements (common → rare → legendary)
     this.checkAndUnlock('tool_century', this.progress.stats.totalToolUses)
     this.checkAndUnlock('tool_thousand', this.progress.stats.totalToolUses)
+    this.checkAndUnlock('tool_legend', this.progress.stats.totalToolUses)
+
+    // Check for completionist
+    this.checkCompletionist()
 
     this.saveProgress()
   }
@@ -349,6 +475,8 @@ export class AchievementSystem {
     this.progress.stats.totalSessions++
     this.checkAndUnlock('first_session', 1)
     this.checkAndUnlock('session_veteran', this.progress.stats.totalSessions)
+    this.checkAndUnlock('session_commander', this.progress.stats.totalSessions)
+    this.checkCompletionist()
     this.saveProgress()
   }
 
@@ -357,6 +485,8 @@ export class AchievementSystem {
    */
   trackActiveZones(count: number): void {
     this.checkAndUnlock('multi_zone', count)
+    this.checkAndUnlock('zone_overlord', count)
+    this.checkCompletionist()
     this.saveProgress()
   }
 
@@ -367,6 +497,8 @@ export class AchievementSystem {
     this.progress.stats.totalCommits++
     this.checkAndUnlock('first_commit', 1)
     this.checkAndUnlock('commit_streak', this.progress.stats.totalCommits)
+    this.checkAndUnlock('commit_legend', this.progress.stats.totalCommits)
+    this.checkCompletionist()
     this.saveProgress()
   }
 
@@ -378,6 +510,8 @@ export class AchievementSystem {
     this.checkAndUnlock('token_thousand', this.progress.stats.totalTokens)
     this.checkAndUnlock('token_ten_k', this.progress.stats.totalTokens)
     this.checkAndUnlock('token_hundred_k', this.progress.stats.totalTokens)
+    this.checkAndUnlock('token_million', this.progress.stats.totalTokens)
+    this.checkCompletionist()
     this.saveProgress()
   }
 
@@ -390,6 +524,7 @@ export class AchievementSystem {
     } else if (character === 'afrosamurai') {
       this.checkAndUnlock('samurai_mode', 1)
     }
+    this.checkCompletionist()
     this.saveProgress()
   }
 
@@ -404,7 +539,30 @@ export class AchievementSystem {
     if (hour >= 5 && hour < 6) {
       this.checkAndUnlock('early_bird', 1)
     }
+    this.checkCompletionist()
     this.saveProgress()
+  }
+
+  /**
+   * Check if all non-secret achievements are unlocked (for completionist)
+   */
+  private checkCompletionist(): void {
+    // Don't check if already unlocked
+    if (this.progress.achievements['completionist']?.unlockedAt) {
+      return
+    }
+
+    // Get all non-secret achievements
+    const nonSecretAchievements = ACHIEVEMENTS.filter((a) => !a.secret)
+
+    // Check if all are unlocked
+    const allUnlocked = nonSecretAchievements.every(
+      (a) => this.progress.achievements[a.id]?.unlockedAt
+    )
+
+    if (allUnlocked) {
+      this.checkAndUnlock('completionist', 1)
+    }
   }
 
   private checkAndUnlock(achievementId: string, currentValue: number): boolean {
