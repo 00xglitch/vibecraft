@@ -61,6 +61,7 @@ export class Wizard implements ICharacter {
   // Base positions for animation
   private bodyBaseY = 0
   private beardBaseY = 0
+  private hatBaseY = 0
 
   // Behavior systems
   private idleBehaviorManager: IdleBehaviorManager
@@ -103,6 +104,7 @@ export class Wizard implements ICharacter {
     // Store base positions for animation
     this.bodyBaseY = this.body.position.y
     this.beardBaseY = this.beard.position.y
+    this.hatBaseY = this.hat.position.y
 
     // Initialize behavior systems
     this.idleBehaviorManager = new IdleBehaviorManager()
@@ -686,6 +688,7 @@ export class Wizard implements ICharacter {
     } else if (state === 'idle') {
       // Reset all positions and rotations
       this.head.rotation.set(0, 0, 0)
+      this.hat.position.y = this.hatBaseY
       this.hat.rotation.set(0, 0, 0)
       this.body.position.y = this.bodyBaseY
       this.body.rotation.set(0, 0, 0)

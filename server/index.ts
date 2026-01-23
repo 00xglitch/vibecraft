@@ -556,26 +556,46 @@ function debug(...args: unknown[]) {
  *   ↓ 12k tokens
  */
 function parseTokensFromOutput(output: string): number | null {
-  // Match patterns like: ↓ 879 tokens, ↓ 1,234 tokens, ↓ 12.5k tokens
+  // Match multiple token display formats from Claude Code:
+  // - "↓ 879 tokens" (classic)
+  // - "Input: 1,234 | Output: 567" (newer)
+  // - "Tokens: 12.5k" (compact)
+  // - "⚡ 879 tokens" (with emoji)
   const patterns = [
-    /↓\s*([0-9,]+)\s*tokens?/gi, // ↓ 879 tokens, ↓ 1,234 tokens
-    /↓\s*([0-9.]+)k\s*tokens?/gi, // ↓ 12.5k tokens, ↓ 12k tokens
+    /(?:↓|⚡)\s*([0-9,]+)\s*tokens?/gi, // ↓ 879 tokens, ⚡ 1,234 tokens
+    /(?:↓|⚡)\s*([0-9.]+)k\s*tokens?/gi, // ↓ 12.5k tokens, ⚡ 12k tokens
+    /(?:Input|Output):\s*([0-9,]+)/gi, // Input: 1,234 | Output: 567
+    /Tokens?:\s*([0-9,]+)/gi, // Tokens: 879
+    /Tokens?:\s*([0-9.]+)k/gi, // Tokens: 12.5k
+    /\[([0-9,]+)\s*tokens?\]/gi, // [879 tokens]
+    /\(([0-9,]+)\s*tokens?\)/gi, // (879 tokens)
   ]
 
   let maxTokens = 0
 
-  // Pattern 1: plain numbers (possibly with commas)
-  const plainMatches = output.matchAll(patterns[0])
-  for (const match of plainMatches) {
-    const num = parseInt(match[1].replace(/,/g, ''), 10)
-    if (num > maxTokens) maxTokens = num
+  // Try all patterns
+  for (const pattern of patterns) {
+    const matches = output.matchAll(pattern)
+    for (const match of matches) {
+      let num = 0
+      const value = match[1]
+
+      // Handle 'k' suffix (thousands)
+      if (value.includes('.') && pattern.source.includes('k')) {
+        num = Math.round(parseFloat(value) * 1000)
+      } else {
+        num = parseInt(value.replace(/,/g, ''), 10)
+      }
+
+      if (!isNaN(num) && num > maxTokens) {
+        maxTokens = num
+      }
+    }
   }
 
-  // Pattern 2: k suffix (thousands)
-  const kMatches = output.matchAll(patterns[1])
-  for (const match of kMatches) {
-    const num = Math.round(parseFloat(match[1]) * 1000)
-    if (num > maxTokens) maxTokens = num
+  // Debug log if no tokens found
+  if (maxTokens === 0 && DEBUG) {
+    debug('Token parse failed. Last 200 chars:', output.slice(-200))
   }
 
   return maxTokens > 0 ? maxTokens : null
