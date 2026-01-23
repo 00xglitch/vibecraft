@@ -692,19 +692,35 @@ export class Claude implements ICharacter {
   }
 
   private update(delta: number): void {
-    // Movement
+    // Movement with smooth acceleration/deceleration
     if (this.targetPosition && this.state === 'walking') {
       const direction = this.targetPosition.clone().sub(this.mesh.position)
       const distance = direction.length()
 
       if (distance > 0.1) {
         direction.normalize()
-        const moveDistance = Math.min(this.moveSpeed * delta, distance)
+
+        // Smooth easing based on distance (accelerate at start, decelerate near end)
+        let speedMultiplier = 1.0
+        if (distance < 1.0) {
+          // Decelerate when close to target (smooth stop)
+          speedMultiplier = Math.pow(distance, 0.7) // Ease out
+        }
+
+        const moveDistance = Math.min(this.moveSpeed * delta * speedMultiplier, distance)
         this.mesh.position.add(direction.multiplyScalar(moveDistance))
 
-        // Face movement direction
-        const angle = Math.atan2(direction.x, direction.z)
-        this.mesh.rotation.y = angle
+        // Smooth rotation towards movement direction
+        const targetAngle = Math.atan2(direction.x, direction.z)
+        const currentAngle = this.mesh.rotation.y
+        let angleDiff = targetAngle - currentAngle
+
+        // Normalize angle difference to [-π, π]
+        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2
+        while (angleDiff < -Math.PI) angleDiff += Math.PI * 2
+
+        // Smooth rotation interpolation
+        this.mesh.rotation.y += angleDiff * Math.min(delta * 8, 1)
 
         // Walking animation
         this.bobTime += delta * 12

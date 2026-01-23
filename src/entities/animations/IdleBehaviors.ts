@@ -67,7 +67,7 @@ const lookAround: IdleBehavior = {
     parts.leftEye.position.set(-0.07, 0.03, 0.242)
     parts.rightEye.position.set(0.07, 0.03, 0.242)
     parts.head.rotation.z = 0
-  }
+  },
 }
 
 const curiousTilt: IdleBehavior = {
@@ -93,7 +93,7 @@ const curiousTilt: IdleBehavior = {
     parts.antenna.rotation.x = 0
     parts.leftEye.scale.setScalar(1)
     parts.rightEye.scale.setScalar(1)
-  }
+  },
 }
 
 const happyBounce: IdleBehavior = {
@@ -126,7 +126,7 @@ const happyBounce: IdleBehavior = {
     parts.leftArm.rotation.set(0, 0, 0)
     parts.rightArm.rotation.set(0, 0, 0)
     parts.antenna.rotation.set(0, 0, 0)
-  }
+  },
 }
 
 const stretch: IdleBehavior = {
@@ -175,7 +175,7 @@ const stretch: IdleBehavior = {
     parts.head.rotation.x = 0
     parts.leftEye.scale.setScalar(1)
     parts.rightEye.scale.setScalar(1)
-  }
+  },
 }
 
 const wave: IdleBehavior = {
@@ -213,7 +213,7 @@ const wave: IdleBehavior = {
     parts.rightArm.rotation.set(0, 0, 0)
     parts.leftEye.position.z = 0.242
     parts.rightEye.position.z = 0.242
-  }
+  },
 }
 
 const doubleBlink: IdleBehavior = {
@@ -243,7 +243,7 @@ const doubleBlink: IdleBehavior = {
   reset: (parts) => {
     parts.leftEye.scale.setScalar(1)
     parts.rightEye.scale.setScalar(1)
-  }
+  },
 }
 
 const antennaTwitch: IdleBehavior = {
@@ -271,7 +271,7 @@ const antennaTwitch: IdleBehavior = {
   reset: (parts) => {
     parts.antenna.rotation.z = 0
     parts.antenna.rotation.x = 0
-  }
+  },
 }
 
 const headShake: IdleBehavior = {
@@ -294,7 +294,7 @@ const headShake: IdleBehavior = {
     parts.head.rotation.y = 0
     parts.leftEye.position.x = -0.07
     parts.rightEye.position.x = 0.07
-  }
+  },
 }
 
 const peek: IdleBehavior = {
@@ -322,7 +322,7 @@ const peek: IdleBehavior = {
     }
 
     parts.mesh.rotation.z = lean * 0.15
-    parts.head.rotation.z = -lean * 0.1  // Counter-tilt head
+    parts.head.rotation.z = -lean * 0.1 // Counter-tilt head
     parts.leftEye.position.x = -0.07 + eyeShift * 0.02
     parts.rightEye.position.x = 0.07 + eyeShift * 0.02
   },
@@ -331,7 +331,7 @@ const peek: IdleBehavior = {
     parts.head.rotation.z = 0
     parts.leftEye.position.x = -0.07
     parts.rightEye.position.x = 0.07
-  }
+  },
 }
 
 const sleepyNod: IdleBehavior = {
@@ -373,7 +373,7 @@ const sleepyNod: IdleBehavior = {
     parts.leftEye.scale.setScalar(1)
     parts.rightEye.scale.setScalar(1)
     parts.antenna.rotation.x = 0
-  }
+  },
 }
 
 // ----------------------------------------------------------------------------
@@ -425,7 +425,7 @@ const discoFever: IdleBehavior = {
     parts.leftArm.rotation.set(0, 0, 0)
     parts.rightArm.rotation.set(0, 0, 0)
     parts.head.rotation.set(0, 0, 0)
-  }
+  },
 }
 
 const robotDance: IdleBehavior = {
@@ -482,7 +482,7 @@ const robotDance: IdleBehavior = {
     parts.leftArm.rotation.set(0, 0, 0)
     parts.rightArm.rotation.set(0, 0, 0)
     parts.head.rotation.set(0, 0, 0)
-  }
+  },
 }
 
 const headBanger: IdleBehavior = {
@@ -490,28 +490,59 @@ const headBanger: IdleBehavior = {
   duration: 2.5,
   weight: 2,
   update: (parts, progress) => {
-    // Head banging! Heavy metal style
-    const bangSpeed = 6
-    const t = progress * bangSpeed
-    const bangPhase = t % 1
+    // Head banging with anticipation and follow-through!
+    // Phases: Anticipation (0-0.15), Main action (0.15-0.8), Follow-through (0.8-1.0)
 
-    // Intense head bang forward
-    const bangAngle = Math.sin(bangPhase * Math.PI) * 0.4
-    parts.head.rotation.x = bangAngle
+    if (progress < 0.15) {
+      // Anticipation: Pull back slightly before banging
+      const anticipation = easeOut(progress / 0.15)
+      parts.head.rotation.x = -0.1 * anticipation
+      parts.body.rotation.x = -0.05 * anticipation
 
-    // Arms pump with the beat
-    const armPump = Math.sin(bangPhase * Math.PI) * 0.5
-    parts.leftArm.rotation.x = -0.5 - armPump
-    parts.rightArm.rotation.x = -0.5 - armPump
-    parts.leftArm.rotation.z = -0.3
-    parts.rightArm.rotation.z = 0.3
+      // Arms prepare
+      parts.leftArm.rotation.x = -anticipation * 0.2
+      parts.rightArm.rotation.x = -anticipation * 0.2
+      parts.leftArm.rotation.z = -0.1 * anticipation
+      parts.rightArm.rotation.z = 0.1 * anticipation
+    } else if (progress < 0.8) {
+      // Main action: Bang forward with intensity
+      const actionProgress = (progress - 0.15) / 0.65
+      const bangSpeed = 4
+      const t = actionProgress * bangSpeed
+      const bangPhase = t % 1
 
-    // Slight body movement
-    parts.body.rotation.x = bangAngle * 0.3
+      // Intense head bang forward
+      const bangAngle = Math.sin(bangPhase * Math.PI) * 0.4
+      parts.head.rotation.x = bangAngle
 
-    // Antenna goes wild
-    parts.antenna.rotation.x = -bangAngle * 0.8
-    parts.antenna.rotation.z = Math.sin(t * Math.PI * 2) * 0.2
+      // Arms pump with the beat
+      const armPump = Math.sin(bangPhase * Math.PI) * 0.5
+      parts.leftArm.rotation.x = -0.5 - armPump
+      parts.rightArm.rotation.x = -0.5 - armPump
+      parts.leftArm.rotation.z = -0.3
+      parts.rightArm.rotation.z = 0.3
+
+      // Body follows
+      parts.body.rotation.x = bangAngle * 0.3
+
+      // Antenna goes wild
+      parts.antenna.rotation.x = -bangAngle * 0.8
+      parts.antenna.rotation.z = Math.sin(t * Math.PI * 2) * 0.2
+    } else {
+      // Follow-through: Settle back down smoothly
+      const followThrough = (progress - 0.8) / 0.2
+      const settle = 1 - easeOut(followThrough)
+
+      // Gradually return to neutral
+      parts.head.rotation.x = settle * 0.15
+      parts.body.rotation.x = settle * 0.08
+      parts.leftArm.rotation.x = -settle * 0.3
+      parts.rightArm.rotation.x = -settle * 0.3
+      parts.leftArm.rotation.z = -settle * 0.15
+      parts.rightArm.rotation.z = settle * 0.15
+      parts.antenna.rotation.x = -settle * 0.2
+      parts.antenna.rotation.z = settle * 0.1
+    }
   },
   reset: (parts) => {
     parts.head.rotation.x = 0
@@ -519,7 +550,7 @@ const headBanger: IdleBehavior = {
     parts.leftArm.rotation.set(0, 0, 0)
     parts.rightArm.rotation.set(0, 0, 0)
     parts.antenna.rotation.set(0, 0, 0)
-  }
+  },
 }
 
 const shuffleDance: IdleBehavior = {
@@ -533,9 +564,14 @@ const shuffleDance: IdleBehavior = {
     const beatProgress = beatTime % 1
 
     // Shuffle position - quick snap to side, then slide back
-    const shuffleEase = beat === 0
-      ? (beatProgress < 0.2 ? easeOut(beatProgress * 5) : 1 - easeIn((beatProgress - 0.2) / 0.8) * 0.5)
-      : (beatProgress < 0.2 ? easeOut(beatProgress * 5) : 1 - easeIn((beatProgress - 0.2) / 0.8) * 0.5)
+    const shuffleEase =
+      beat === 0
+        ? beatProgress < 0.2
+          ? easeOut(beatProgress * 5)
+          : 1 - easeIn((beatProgress - 0.2) / 0.8) * 0.5
+        : beatProgress < 0.2
+          ? easeOut(beatProgress * 5)
+          : 1 - easeIn((beatProgress - 0.2) / 0.8) * 0.5
 
     const shuffleX = beat === 0 ? shuffleEase * 0.15 : -shuffleEase * 0.15
     parts.mesh.position.x = (parts.mesh.userData.originalX ?? 0) + shuffleX
@@ -562,7 +598,7 @@ const shuffleDance: IdleBehavior = {
     parts.leftArm.rotation.set(0, 0, 0)
     parts.rightArm.rotation.set(0, 0, 0)
     parts.head.rotation.z = 0
-  }
+  },
 }
 
 const twistDance: IdleBehavior = {
@@ -600,7 +636,7 @@ const twistDance: IdleBehavior = {
     parts.rightArm.rotation.set(0, 0, 0)
     parts.mesh.position.x = parts.mesh.userData.originalX ?? 0
     parts.mesh.position.y = parts.mesh.userData.originalY ?? 0
-  }
+  },
 }
 
 const victoryDance: IdleBehavior = {
@@ -608,36 +644,70 @@ const victoryDance: IdleBehavior = {
   duration: 2.5,
   weight: 2,
   update: (parts, progress) => {
-    // Celebratory fist pumps and jumping!
-    const beatTime = progress * 5
-    const beat = Math.floor(beatTime) % 2
-    const beatProgress = beatTime % 1
+    // Celebratory fist pumps with anticipation and follow-through!
+    // Phases: Anticipation (0-0.1), Main celebration (0.1-0.85), Follow-through (0.85-1.0)
 
-    // Jump up!
-    const jumpHeight = Math.sin(beatProgress * Math.PI) * 0.15
-    parts.mesh.position.y = (parts.mesh.userData.originalY ?? 0) + jumpHeight
+    if (progress < 0.1) {
+      // Anticipation: Crouch slightly before explosive celebration
+      const crouch = easeOut(progress / 0.1)
+      parts.mesh.position.y = (parts.mesh.userData.originalY ?? 0) - 0.05 * crouch
 
-    // Alternating fist pumps
-    if (beat === 0) {
-      parts.rightArm.rotation.x = -2.8
-      parts.rightArm.rotation.z = 0.2 + Math.sin(beatProgress * Math.PI) * 0.3
-      parts.leftArm.rotation.x = -0.5
-      parts.leftArm.rotation.z = -0.2
+      // Pull arms down in preparation
+      parts.leftArm.rotation.x = -0.3 * crouch
+      parts.rightArm.rotation.x = -0.3 * crouch
+      parts.leftArm.rotation.z = -0.1 * crouch
+      parts.rightArm.rotation.z = 0.1 * crouch
+
+      // Slight head lean
+      parts.head.rotation.x = 0.1 * crouch
+    } else if (progress < 0.85) {
+      // Main celebration: Fist pumps and jumping!
+      const actionProgress = (progress - 0.1) / 0.75
+      const beatTime = actionProgress * 5
+      const beat = Math.floor(beatTime) % 2
+      const beatProgress = beatTime % 1
+
+      // Jump up with explosive energy!
+      const jumpHeight = Math.sin(beatProgress * Math.PI) * 0.15
+      parts.mesh.position.y = (parts.mesh.userData.originalY ?? 0) + jumpHeight
+
+      // Alternating fist pumps
+      if (beat === 0) {
+        parts.rightArm.rotation.x = -2.8
+        parts.rightArm.rotation.z = 0.2 + Math.sin(beatProgress * Math.PI) * 0.3
+        parts.leftArm.rotation.x = -0.5
+        parts.leftArm.rotation.z = -0.2
+      } else {
+        parts.leftArm.rotation.x = -2.8
+        parts.leftArm.rotation.z = -0.2 - Math.sin(beatProgress * Math.PI) * 0.3
+        parts.rightArm.rotation.x = -0.5
+        parts.rightArm.rotation.z = 0.2
+      }
+
+      // Happy head movements
+      parts.head.rotation.z = Math.sin(beatTime * Math.PI * 2) * 0.1
     } else {
-      parts.leftArm.rotation.x = -2.8
-      parts.leftArm.rotation.z = -0.2 - Math.sin(beatProgress * Math.PI) * 0.3
-      parts.rightArm.rotation.x = -0.5
-      parts.rightArm.rotation.z = 0.2
+      // Follow-through: Settle down smoothly, catching breath
+      const followThrough = (progress - 0.85) / 0.15
+      const settle = 1 - easeOut(followThrough)
+
+      // Gentle landing
+      parts.mesh.position.y = (parts.mesh.userData.originalY ?? 0) + settle * 0.05
+
+      // Arms relax
+      parts.leftArm.rotation.x = -settle * 0.4
+      parts.rightArm.rotation.x = -settle * 0.4
+      parts.leftArm.rotation.z = -settle * 0.15
+      parts.rightArm.rotation.z = settle * 0.15
+
+      // Head returns to neutral
+      parts.head.rotation.z = settle * 0.05
+      parts.head.rotation.x = -settle * 0.05
+
+      // Eyes return to normal
+      parts.leftEye.scale.setScalar(1)
+      parts.rightEye.scale.setScalar(1)
     }
-
-    // Happy head movements
-    parts.head.rotation.z = Math.sin(beatTime * Math.PI * 2) * 0.1
-    parts.head.rotation.y = Math.sin(beatTime * Math.PI) * 0.1
-
-    // Eyes excited (slightly bigger)
-    const excitement = 1 + Math.sin(beatProgress * Math.PI) * 0.1
-    parts.leftEye.scale.setScalar(excitement)
-    parts.rightEye.scale.setScalar(excitement)
   },
   reset: (parts) => {
     parts.mesh.position.y = parts.mesh.userData.originalY ?? 0
@@ -646,7 +716,7 @@ const victoryDance: IdleBehavior = {
     parts.head.rotation.set(0, 0, 0)
     parts.leftEye.scale.setScalar(1)
     parts.rightEye.scale.setScalar(1)
-  }
+  },
 }
 
 const danceMoves: IdleBehavior = {
@@ -687,7 +757,7 @@ const danceMoves: IdleBehavior = {
     parts.head.rotation.z = 0
     parts.leftArm.rotation.set(0, 0, 0)
     parts.rightArm.rotation.set(0, 0, 0)
-  }
+  },
 }
 
 // ============================================================================
@@ -707,13 +777,13 @@ export const IDLE_BEHAVIORS: IdleBehavior[] = [
   peek,
   sleepyNod,
   // Dance styles!
-  danceMoves,       // grooveDance - basic side-to-side
-  discoFever,       // 70s disco pointing
-  robotDance,       // mechanical stiff moves
-  headBanger,       // metal head bang
-  shuffleDance,     // side shuffle with arm pumps
-  twistDance,       // classic 60s twist
-  victoryDance,     // celebratory fist pumps
+  danceMoves, // grooveDance - basic side-to-side
+  discoFever, // 70s disco pointing
+  robotDance, // mechanical stiff moves
+  headBanger, // metal head bang
+  shuffleDance, // side shuffle with arm pumps
+  twistDance, // classic 60s twist
+  victoryDance, // celebratory fist pumps
 ]
 
 // ============================================================================
@@ -724,12 +794,12 @@ export class IdleBehaviorManager {
   private behaviors: IdleBehavior[]
   private currentBehavior: IdleBehavior | null = null
   private behaviorProgress = 0
-  private cooldown = 0  // Time until next behavior can start
+  private cooldown = 0 // Time until next behavior can start
 
   // === TUNING ===
-  private readonly MIN_COOLDOWN = 2    // Minimum seconds between behaviors
-  private readonly MAX_COOLDOWN = 6    // Maximum seconds between behaviors
-  private readonly BASE_IDLE_WEIGHT = 20  // Weight for "do nothing" (just base idle)
+  private readonly MIN_COOLDOWN = 2 // Minimum seconds between behaviors
+  private readonly MAX_COOLDOWN = 6 // Maximum seconds between behaviors
+  private readonly BASE_IDLE_WEIGHT = 20 // Weight for "do nothing" (just base idle)
 
   constructor(behaviors: IdleBehavior[] = IDLE_BEHAVIORS) {
     this.behaviors = behaviors
@@ -827,12 +897,12 @@ export class IdleBehaviorManager {
 
   /** Get list of all behavior names (for dev UI) */
   getBehaviorNames(): string[] {
-    return this.behaviors.map(b => b.name)
+    return this.behaviors.map((b) => b.name)
   }
 
   /** Force play a specific behavior by name (for dev/testing) */
   forcePlay(name: string, parts: CharacterParts): boolean {
-    const behavior = this.behaviors.find(b => b.name === name)
+    const behavior = this.behaviors.find((b) => b.name === name)
     if (!behavior) return false
 
     // Stop current behavior if any

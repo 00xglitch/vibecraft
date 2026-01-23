@@ -27,7 +27,7 @@ export interface CharacterParts {
   rightArm: THREE.Group
   antenna: THREE.Group
   body: THREE.Group
-  mesh: THREE.Group  // Root mesh for whole-body animations
+  mesh: THREE.Group // Root mesh for whole-body animations
 }
 
 // ============================================================================
@@ -36,12 +36,12 @@ export interface CharacterParts {
 
 /** Categories for organizing and filtering behaviors */
 export type AnimationCategory =
-  | 'idle'        // Random idle fidgets
-  | 'dance'       // Dance moves
-  | 'emote'       // Emotional expressions
-  | 'work'        // Station-specific work
-  | 'reaction'    // Success/error/completion reactions
-  | 'transition'  // State change animations
+  | 'idle' // Random idle fidgets
+  | 'dance' // Dance moves
+  | 'emote' // Emotional expressions
+  | 'work' // Station-specific work
+  | 'reaction' // Success/error/completion reactions
+  | 'transition' // State change animations
 
 /**
  * Base animation behavior interface
@@ -104,12 +104,10 @@ export const easeInOut = (t: number): number =>
   t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2
 
 /** Ease out (fast start, slow end) */
-export const easeOut = (t: number): number =>
-  1 - Math.pow(1 - t, 3)
+export const easeOut = (t: number): number => 1 - Math.pow(1 - t, 3)
 
 /** Ease in (slow start, fast end) */
-export const easeIn = (t: number): number =>
-  t * t * t
+export const easeIn = (t: number): number => t * t * t
 
 /** Bounce easing (playful bouncy motion) */
 export const bounce = (t: number): number => {
@@ -126,7 +124,7 @@ export const elastic = (t: number): number => {
   if (t === 0 || t === 1) return t
   const p = 0.3
   const s = p / 4
-  return Math.pow(2, -10 * t) * Math.sin((t - s) * (2 * Math.PI) / p) + 1
+  return Math.pow(2, -10 * t) * Math.sin(((t - s) * (2 * Math.PI)) / p) + 1
 }
 
 /** Back easing (slight overshoot) */
@@ -146,8 +144,7 @@ export const linear = (t: number): number => t
 /**
  * Interpolate between two values
  */
-export const lerp = (a: number, b: number, t: number): number =>
-  a + (b - a) * t
+export const lerp = (a: number, b: number, t: number): number => a + (b - a) * t
 
 /**
  * Clamp a value between min and max
@@ -171,14 +168,93 @@ export const mapRange = (
 /**
  * Create a ping-pong value (0→1→0) from progress
  */
-export const pingPong = (t: number): number =>
-  t < 0.5 ? t * 2 : 2 - t * 2
+export const pingPong = (t: number): number => (t < 0.5 ? t * 2 : 2 - t * 2)
 
 /**
  * Create a stepped value (discrete steps instead of smooth)
  */
-export const stepped = (t: number, steps: number): number =>
-  Math.floor(t * steps) / steps
+export const stepped = (t: number, steps: number): number => Math.floor(t * steps) / steps
+
+// ============================================================================
+// Velocity System - Physics-based smooth movement
+// ============================================================================
+
+/**
+ * Velocity state for smooth physics-based movement
+ * Tracks current position, rotation, and their velocities
+ */
+export interface VelocityState {
+  position: THREE.Vector3
+  rotation: THREE.Euler
+  velocity: THREE.Vector3
+  angularVelocity: THREE.Euler
+}
+
+/**
+ * Update a velocity state towards a target with smooth damping
+ *
+ * This creates natural acceleration/deceleration by:
+ * 1. Calculating velocity towards target
+ * 2. Applying velocity to position/rotation
+ * 3. Damping velocity each frame for smooth stops
+ *
+ * @param current - Current state to update (mutated)
+ * @param target - Target state to move towards
+ * @param deltaTime - Frame delta time in seconds
+ * @param smoothing - Smoothing factor 0-1 (lower = smoother, higher = snappier)
+ * @param damping - Velocity damping 0-1 (lower = more drift, higher = faster stops)
+ *
+ * @example
+ * // In character update():
+ * const current: VelocityState = {
+ *   position: this.mesh.position.clone(),
+ *   rotation: this.mesh.rotation.clone(),
+ *   velocity: this.velocity,
+ *   angularVelocity: this.angularVelocity
+ * }
+ * const target: VelocityState = {
+ *   position: targetPosition,
+ *   rotation: targetRotation,
+ *   velocity: new THREE.Vector3(),
+ *   angularVelocity: new THREE.Euler()
+ * }
+ * updateWithVelocity(current, target, deltaTime, 0.1, 0.95)
+ * this.mesh.position.copy(current.position)
+ * this.mesh.rotation.copy(current.rotation)
+ */
+export const updateWithVelocity = (
+  current: VelocityState,
+  target: VelocityState,
+  deltaTime: number,
+  smoothing: number = 0.1,
+  damping: number = 0.95
+): void => {
+  // Position smoothing
+  const positionDelta = target.position.clone().sub(current.position)
+  const velocityTarget = positionDelta.multiplyScalar(smoothing)
+  current.velocity.lerp(velocityTarget, deltaTime * 10)
+  current.position.add(current.velocity.clone().multiplyScalar(deltaTime))
+
+  // Rotation smoothing
+  const rotDiff = new THREE.Euler(
+    target.rotation.x - current.rotation.x,
+    target.rotation.y - current.rotation.y,
+    target.rotation.z - current.rotation.z
+  )
+  current.angularVelocity.x += rotDiff.x * smoothing * deltaTime * 10
+  current.angularVelocity.y += rotDiff.y * smoothing * deltaTime * 10
+  current.angularVelocity.z += rotDiff.z * smoothing * deltaTime * 10
+
+  current.rotation.x += current.angularVelocity.x * deltaTime
+  current.rotation.y += current.angularVelocity.y * deltaTime
+  current.rotation.z += current.angularVelocity.z * deltaTime
+
+  // Apply damping for smooth stops
+  current.velocity.multiplyScalar(damping)
+  current.angularVelocity.x *= damping
+  current.angularVelocity.y *= damping
+  current.angularVelocity.z *= damping
+}
 
 // ============================================================================
 // Default Pose - Reset helper
