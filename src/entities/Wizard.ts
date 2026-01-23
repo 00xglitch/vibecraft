@@ -158,21 +158,21 @@ export class Wizard implements ICharacter {
     rightBrow.rotation.z = -0.15
     group.add(rightBrow)
 
-    // Eyes - wise and knowing
-    const eyeGeo = new THREE.SphereGeometry(0.04, 8, 8)
+    // Eyes - wise and knowing (made larger and more prominent)
+    const eyeGeo = new THREE.SphereGeometry(0.06, 12, 12) // Increased from 0.04 to 0.06
     const eyeMat = new THREE.MeshStandardMaterial({
       color: 0x4169e1, // Royal blue - magical eyes
       emissive: 0x1a1aff,
-      emissiveIntensity: 0.3,
+      emissiveIntensity: 0.5, // Increased glow
     })
 
     const leftEye = new THREE.Mesh(eyeGeo, eyeMat)
-    leftEye.position.set(-0.1, 1.18, 0.24)
+    leftEye.position.set(-0.1, 1.18, 0.29) // Moved forward from 0.24 to 0.29
     leftEye.name = 'leftEye'
     group.add(leftEye)
 
     const rightEye = new THREE.Mesh(eyeGeo, eyeMat)
-    rightEye.position.set(0.1, 1.18, 0.24)
+    rightEye.position.set(0.1, 1.18, 0.29) // Moved forward from 0.24 to 0.29
     rightEye.name = 'rightEye'
     group.add(rightEye)
 

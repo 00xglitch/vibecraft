@@ -12,11 +12,7 @@ import * as THREE from 'three'
 import type { StationType } from '../../shared/types'
 import type { WorkshopScene } from '../scene/WorkshopScene'
 import type { ICharacter, CharacterOptions, CharacterState } from './ICharacter'
-import {
-  IdleBehaviorManager,
-  WorkingBehaviorManager,
-  type CharacterParts,
-} from './animations'
+import { IdleBehaviorManager, WorkingBehaviorManager, type CharacterParts } from './animations'
 
 export type NinjaOptions = CharacterOptions
 
@@ -56,6 +52,14 @@ export class Ninja implements ICharacter {
   private scarf: THREE.Group
   private katana: THREE.Group
 
+  // Base positions for animation reset
+  private headBaseY = 0
+  private bodyBaseY = 0
+  private leftArmBaseY = 0
+  private leftArmBaseX = 0
+  private rightArmBaseY = 0
+  private rightArmBaseX = 0
+
   // Behavior systems
   private idleBehaviorManager: IdleBehaviorManager
   private workingBehaviorManager: WorkingBehaviorManager
@@ -87,6 +91,14 @@ export class Ninja implements ICharacter {
     this.mesh.add(this.scarf)
     this.mesh.add(this.katana)
     this.mesh.add(this.statusRing)
+
+    // Store base positions for animation reset
+    this.headBaseY = this.head.position.y
+    this.bodyBaseY = this.body.position.y
+    this.leftArmBaseY = this.leftArm.position.y
+    this.leftArmBaseX = this.leftArm.position.x
+    this.rightArmBaseY = this.rightArm.position.y
+    this.rightArmBaseX = this.rightArm.position.x
 
     this.idleBehaviorManager = new IdleBehaviorManager()
     this.workingBehaviorManager = new WorkingBehaviorManager()
@@ -475,9 +487,16 @@ export class Ninja implements ICharacter {
     if (state === 'working') {
       this.workingBehaviorManager.start(this.currentStation, parts)
     } else {
+      // Reset positions and rotations to base state
+      this.head.position.y = this.headBaseY
       this.head.rotation.set(0, 0, 0)
+      this.body.position.y = this.bodyBaseY
       this.body.rotation.set(0, 0, 0)
+      this.leftArm.position.y = this.leftArmBaseY
+      this.leftArm.position.x = this.leftArmBaseX
       this.leftArm.rotation.set(0, 0, 0)
+      this.rightArm.position.y = this.rightArmBaseY
+      this.rightArm.position.x = this.rightArmBaseX
       this.rightArm.rotation.set(0, 0, 0)
     }
 
@@ -485,7 +504,7 @@ export class Ninja implements ICharacter {
       idle: 0x4ade80,
       walking: 0x60a5fa,
       working: 0xfb923c,
-      thinking: 0xa78bfa
+      thinking: 0xa78bfa,
     }
     const ring = this.statusRing.material as THREE.MeshBasicMaterial
     ring.color.setHex(colors[state])
