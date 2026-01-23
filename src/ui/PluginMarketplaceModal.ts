@@ -10,6 +10,7 @@
  */
 
 import { toast } from './Toast'
+import type { ManagedSession } from '../../shared/types'
 
 let modal: HTMLElement | null = null
 let activeTab: 'marketplace' | 'installed' = 'marketplace'
@@ -18,6 +19,7 @@ let installedPlugins: InstalledPlugin[] = []
 let categories: string[] = []
 let searchQuery = ''
 let selectedCategory: string | null = null
+let currentSession: ManagedSession | null = null
 
 interface Plugin {
   id: string
@@ -42,9 +44,34 @@ interface InstalledPlugin extends Plugin {
   configPath?: string
 }
 
-export async function show(): Promise<void> {
+export async function show(sessionId?: string): Promise<void> {
   if (!modal) {
     createModal()
+  }
+
+  // Fetch session if provided
+  if (sessionId) {
+    try {
+      const res = await fetch(`/sessions/${sessionId}`)
+      const data = await res.json()
+      if (data.ok) {
+        currentSession = data.session
+      }
+    } catch (err) {
+      console.error('[PluginMarketplace] Failed to fetch session:', err)
+    }
+  } else {
+    currentSession = null
+  }
+
+  // Update modal title
+  const title = modal!.querySelector('.plugins-modal-title')
+  if (title) {
+    if (currentSession) {
+      title.textContent = `🔌 Plugins - ${currentSession.name}`
+    } else {
+      title.textContent = '🔌 Plugin Marketplace'
+    }
   }
 
   // Fetch data
@@ -331,6 +358,7 @@ function renderSection(title: string, plugins: Plugin[]): HTMLElement {
 
 function createPluginItem(plugin: Plugin): HTMLElement {
   const isInstalled = installedPlugins.some((p) => p.id === plugin.id)
+  const isEnabledForSession = currentSession && currentSession.enabledPlugins?.includes(plugin.id)
 
   const item = document.createElement('div')
   item.className = 'plugin-modal-item'
@@ -370,18 +398,44 @@ function createPluginItem(plugin: Plugin): HTMLElement {
   item.appendChild(icon)
   item.appendChild(info)
 
+  // Actions container
+  const actions = document.createElement('div')
+  actions.style.cssText = 'display: flex; flex-direction: column; gap: 8px; align-items: flex-end;'
+
   if (isInstalled) {
+    // Show installed status
     const status = document.createElement('div')
     status.className = 'plugin-modal-status active'
     status.textContent = '✓ Installed'
-    item.appendChild(status)
+    actions.appendChild(status)
+
+    // If we're in session mode, show enable/disable toggle
+    if (currentSession) {
+      const toggleBtn = document.createElement('button')
+      toggleBtn.className = 'marketplace-btn'
+      if (isEnabledForSession) {
+        toggleBtn.textContent = 'Disable for Session'
+        toggleBtn.style.cssText =
+          'background: rgba(234, 179, 8, 0.15); border-color: rgba(234, 179, 8, 0.3); color: #fbbf24;'
+      } else {
+        toggleBtn.textContent = 'Enable for Session'
+        toggleBtn.style.cssText =
+          'background: rgba(34, 197, 94, 0.15); border-color: rgba(34, 197, 94, 0.3); color: #4ade80;'
+      }
+      toggleBtn.addEventListener('click', () =>
+        togglePluginForSession(plugin.id, !isEnabledForSession)
+      )
+      actions.appendChild(toggleBtn)
+    }
   } else {
     const btn = document.createElement('button')
     btn.className = 'marketplace-btn'
     btn.textContent = 'Install'
     btn.addEventListener('click', () => installPlugin(plugin.id))
-    item.appendChild(btn)
+    actions.appendChild(btn)
   }
+
+  item.appendChild(actions)
 
   return item
 }
@@ -477,6 +531,40 @@ function createInstalledItem(plugin: InstalledPlugin): HTMLElement {
   return item
 }
 
+async function togglePluginForSession(pluginId: string, enable: boolean): Promise<void> {
+  if (!currentSession) return
+
+  const plugin = plugins.find((p) => p.id === pluginId)
+  if (!plugin) return
+
+  try {
+    // Update session's enabled plugins
+    const enabledPlugins = currentSession.enabledPlugins || []
+    const updatedPlugins = enable
+      ? [...enabledPlugins, pluginId]
+      : enabledPlugins.filter((id) => id !== pluginId)
+
+    const res = await fetch(`/sessions/${currentSession.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabledPlugins: updatedPlugins }),
+    })
+
+    const data = await res.json()
+
+    if (data.ok && data.session) {
+      currentSession = data.session
+      toast.success(`${plugin.name} ${enable ? 'enabled' : 'disabled'} for ${data.session.name}`)
+      renderContent()
+    } else {
+      toast.error(`Failed to ${enable ? 'enable' : 'disable'} plugin: ${data.error}`)
+    }
+  } catch (err) {
+    console.error('[PluginMarketplace] Toggle failed:', err)
+    toast.error('Toggle failed')
+  }
+}
+
 async function installPlugin(pluginId: string): Promise<void> {
   const plugin = plugins.find((p) => p.id === pluginId)
   if (!plugin) return
@@ -495,6 +583,12 @@ async function installPlugin(pluginId: string): Promise<void> {
     if (data.ok) {
       toast.success(`${plugin.name} installed successfully!`)
       await fetchInstalled()
+
+      // Auto-enable for current session if in session mode
+      if (currentSession) {
+        await togglePluginForSession(pluginId, true)
+      }
+
       renderContent()
     } else {
       toast.error(`Installation failed: ${data.error}`)
