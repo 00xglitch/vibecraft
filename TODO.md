@@ -16,10 +16,29 @@
 - [x] Wizard hat crash fixed (hatBaseY initialization)
 - [x] Debug logging for token parsing
 
+### Character Visual Improvements (Jan 23, 2026)
+
+- [x] Wizard eyes - increased size and visibility (0.04 → 0.06 radius)
+- [x] Wizard eyes - moved forward (z: 0.24 → 0.29) to prevent embedding
+- [x] Wizard eyes - enhanced glow (emissive 0.3 → 0.5)
+- [x] Ninja - added base position tracking for head, body, arms
+- [x] Ninja - fixed animation reset to prevent position drift
+- [x] AfroSamurai - verified proper resetPose implementation
+
 ### Documentation
 
 - [x] CHANGELOG.md created with full feature list
 - [x] All merged PRs documented (#4-21, #29)
+
+### Marketplace (Jan 23, 2026)
+
+- [x] Plugin Marketplace modal with launch cards
+- [x] MCP Marketplace modal with launch cards
+- [x] Marketplace styling (marketplace.css)
+- [x] Integration with Plugins modal
+- [x] Dynamic imports for code splitting
+- [x] Toast notifications
+- [x] Infrastructure ready for API integration
 
 ## In Progress 🚧
 
@@ -27,16 +46,6 @@
 
 - 68/78 tests passing
 - 10 failures (modal timing issues - non-critical)
-
-### Task #18: Plugin & MCP Marketplace
-
-- [ ] Plugin store UI modal
-- [ ] MCP marketplace UI modal
-- [ ] Fetch plugin list from registry/API
-- [ ] Fetch MCP server list from registry
-- [ ] Search and filtering
-- [ ] Install/enable functionality
-- [ ] Integration with existing PluginManager
 
 ### Task #19: Make Sessions Editable
 
@@ -57,9 +66,9 @@
 ### Character Visual Fixes
 
 - [x] Wizard hat crash - FIXED
-- [x] Wizard eyes - exist but may need validation
-- [ ] AfroSamurai - needs review
-- [ ] Ninja - needs review
+- [x] Wizard eyes - FIXED (increased size, improved visibility)
+- [x] Ninja - FIXED (base position tracking added)
+- [x] AfroSamurai - VERIFIED (proper resetPose implementation)
 
 ### Test Improvements
 
