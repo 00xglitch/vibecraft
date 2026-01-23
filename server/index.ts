@@ -93,6 +93,13 @@ import {
   isWindowsPath,
   isWSLMountPath,
 } from './pathTranslation.js'
+import {
+  listDirectory,
+  getDirectoryTree,
+  getWorkspaces,
+  validatePath,
+  getParentPath,
+} from './fileBrowser.js'
 
 // ============================================================================
 // OpenCode Integration State
@@ -2414,6 +2421,92 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
             mappings,
           })
         )
+      })
+      .catch((e) => {
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: (e as Error).message }))
+      })
+    return
+  }
+
+  // File browser - list directory
+  if (req.method === 'GET' && req.url?.startsWith('/api/files/list')) {
+    const url = new URL(req.url, `http://${req.headers.host}`)
+    const path = url.searchParams.get('path')
+    const includeHidden = url.searchParams.get('includeHidden') === 'true'
+
+    if (!path) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: false, error: 'path query parameter is required' }))
+      return
+    }
+
+    // Validate path
+    const validation = validatePath(path)
+    if (!validation.valid) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: false, error: validation.error }))
+      return
+    }
+
+    listDirectory(path, { includeHidden })
+      .then((entries) => {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, entries, path }))
+      })
+      .catch((e) => {
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: (e as Error).message }))
+      })
+    return
+  }
+
+  // File browser - get directory tree
+  if (req.method === 'GET' && req.url?.startsWith('/api/files/tree')) {
+    const url = new URL(req.url, `http://${req.headers.host}`)
+    const path = url.searchParams.get('path')
+    const depth = parseInt(url.searchParams.get('depth') || '1', 10)
+    const includeHidden = url.searchParams.get('includeHidden') === 'true'
+
+    if (!path) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: false, error: 'path query parameter is required' }))
+      return
+    }
+
+    // Validate depth
+    if (depth < 0 || depth > 5) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: false, error: 'depth must be between 0 and 5' }))
+      return
+    }
+
+    // Validate path
+    const validation = validatePath(path)
+    if (!validation.valid) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: false, error: validation.error }))
+      return
+    }
+
+    getDirectoryTree(path, depth, { includeHidden })
+      .then((tree) => {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, tree }))
+      })
+      .catch((e) => {
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: (e as Error).message }))
+      })
+    return
+  }
+
+  // File browser - get workspaces
+  if (req.method === 'GET' && req.url === '/api/workspaces') {
+    getWorkspaces()
+      .then((workspaces) => {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, workspaces }))
       })
       .catch((e) => {
         res.writeHead(500, { 'Content-Type': 'application/json' })
