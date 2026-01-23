@@ -1112,6 +1112,15 @@ async function createSession(options: CreateSessionRequest = {}): Promise<Manage
   // Use user-provided name, or detected project name, or fallback to counter
   const name = options.name || projectInfo?.name || `Claude ${sessionCounter}`
 
+  // Detect runtime environment
+  const env = getEnvironment()
+  const environmentInfo = {
+    type: env.type,
+    isDocker: env.isDocker,
+    isWSL: env.isWSL,
+  }
+  log(`Creating session in ${env.type} environment`)
+
   // Handle worktree creation if requested
   const flags = options.flags || {}
   let worktreeInfo: { path: string; branch: string; originalRepo: string } | undefined
@@ -1120,19 +1129,51 @@ async function createSession(options: CreateSessionRequest = {}): Promise<Manage
     // Check if directory is a git repo
     const isRepo = await isGitRepo(cwd)
     if (!isRepo) {
-      throw new Error(`Cannot create worktree: ${cwd} is not a git repository`)
-    }
+      // SOFT-FAIL: Log warning and skip worktree creation
+      log(
+        `Warning: Cannot create worktree - ${cwd} is not a git repository. Proceeding without worktree.`
+      )
 
-    // Create worktree
-    const worktree = await createWorktree(cwd, id, name)
-    if (!worktree) {
-      throw new Error(`Failed to create worktree for ${cwd}`)
-    }
+      // Send notification to client (will appear as toast)
+      broadcast({
+        type: 'event',
+        payload: {
+          id: randomUUID(),
+          timestamp: Date.now(),
+          type: 'notification',
+          sessionId: id,
+          cwd,
+          message: `Worktree skipped: ${cwd} is not a git repository`,
+          notificationType: 'warning',
+        },
+      })
 
-    // Use worktree path as the working directory
-    worktreeInfo = worktree
-    cwd = worktree.path
-    log(`Session will use worktree: ${cwd} (branch: ${worktree.branch})`)
+      // Skip worktree creation - continue with regular session
+    } else {
+      // Create worktree
+      const worktree = await createWorktree(cwd, id, name)
+      if (!worktree) {
+        // Also soft-fail if worktree creation fails (git command error)
+        log(`Warning: Failed to create worktree for ${cwd}. Proceeding without worktree.`)
+        broadcast({
+          type: 'event',
+          payload: {
+            id: randomUUID(),
+            timestamp: Date.now(),
+            type: 'notification',
+            sessionId: id,
+            cwd,
+            message: `Worktree creation failed. Using original directory.`,
+            notificationType: 'warning',
+          },
+        })
+      } else {
+        // Success - use worktree path as the working directory
+        worktreeInfo = worktree
+        cwd = worktree.path
+        log(`Session will use worktree: ${cwd} (branch: ${worktree.branch})`)
+      }
+    }
   }
 
   // Build claude command with flags
@@ -1202,6 +1243,8 @@ async function createSession(options: CreateSessionRequest = {}): Promise<Manage
           worktree: worktreeInfo,
           projectName: projectInfo?.name,
           projectSource: projectInfo?.source,
+          environment: environmentInfo,
+          runtime: 'tmux', // Default to tmux runtime for local sessions
         }
 
         managedSessions.set(id, session)
@@ -1267,6 +1310,14 @@ function createImplicitSession(options: CreateImplicitSessionRequest): ManagedSe
   // Use placeholder tmux session name (won't be used for actual tmux operations)
   const tmuxSession = `implicit-${claudeSessionId.slice(0, 8)}`
 
+  // Detect runtime environment
+  const env = getEnvironment()
+  const environmentInfo = {
+    type: env.type,
+    isDocker: env.isDocker,
+    isWSL: env.isWSL,
+  }
+
   const session: ManagedSession = {
     id,
     name,
@@ -1277,6 +1328,8 @@ function createImplicitSession(options: CreateImplicitSessionRequest): ManagedSe
     lastActivity: Date.now(),
     cwd,
     implicit: true, // Mark as implicit - no tmux control
+    environment: environmentInfo,
+    runtime: 'tmux', // Default to tmux runtime
   }
 
   managedSessions.set(id, session)
@@ -1456,6 +1509,15 @@ async function sendPromptToSession(
 
   // Implicit sessions don't have tmux control - suggest restart to adopt
   if (isImplicitSession(session)) {
+    // Check if Docker environment - Docker sessions don't need tmux adoption
+    if (session.environment?.isDocker) {
+      return {
+        ok: false,
+        error:
+          'Cannot send prompts to external Docker sessions. Adopt the session or create a new managed container.',
+      }
+    }
+
     return {
       ok: false,
       error: 'External session has no tmux control. Click restart (🔄) to adopt it.',

@@ -29,6 +29,8 @@ function getNotificationStyle(notificationType: string): { type: ToastType; icon
       return { type: 'success', icon: '✅' }
     case 'elicitation_dialog':
       return { type: 'info', icon: '💬' }
+    case 'warning':
+      return { type: 'warning', icon: '⚠️' }
     default:
       return { type: 'info', icon: '🔔' }
   }
@@ -158,6 +160,13 @@ export function registerNotificationHandlers(): void {
 
     const notifEvent = event as unknown as NotificationEvent
     const { message, notificationType } = notifEvent
+
+    // IMPORTANT: Skip permission_prompt notifications - they're handled by PermissionModal
+    // Permission prompts come through as permission_prompt server messages, not notification events
+    if (notificationType === 'permission_prompt') {
+      return
+    }
+
     const style = getNotificationStyle(notificationType)
 
     // Show toast notification for global visibility

@@ -290,6 +290,12 @@ export type ProjectNameSource = 'package.json' | 'pyproject.toml' | 'git-remote'
 /** Session type discriminator */
 export type SessionType = 'claude' | 'opencode'
 
+/** Runtime environment type */
+export type EnvironmentType = 'docker' | 'wsl' | 'native'
+
+/** Runtime type: tmux (local) or docker (container) */
+export type SessionRuntime = 'tmux' | 'docker'
+
 /** A managed session (Claude or OpenCode) */
 export interface ManagedSession {
   /** Session type - 'claude' for Claude Code, 'opencode' for OpenCode */
@@ -367,6 +373,16 @@ export interface ManagedSession {
   enabledPlugins?: string[]
   /** Enabled MCP server IDs for this session */
   enabledMCPs?: string[]
+  /** Runtime environment where session is running */
+  environment?: {
+    type: EnvironmentType // 'docker' | 'wsl' | 'native'
+    isDocker: boolean
+    isWSL: boolean
+  }
+  /** For Docker: Container ID (if known) */
+  containerId?: string
+  /** Runtime type: 'tmux' (local) or 'docker' (container) */
+  runtime?: SessionRuntime
 }
 
 /** Git repository status */
