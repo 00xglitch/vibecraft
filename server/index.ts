@@ -77,6 +77,7 @@ import {
 import { ChangeTracker } from './ChangeTracker.js'
 import { julesService } from './JulesService.js'
 import { mcpMarketplace } from './MCPMarketplace.js'
+import * as pluginMarketplace from './PluginMarketplace.js'
 import {
   detectEnvironment,
   getEnvironment,
@@ -3570,6 +3571,146 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
             return
           }
           const result = await mcpMarketplace.configure(serverId, envVars || {})
+          res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify(result))
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: 'Invalid JSON' }))
+        }
+      })
+      .catch(() => {
+        res.writeHead(413, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Request body too large' }))
+      })
+    return
+  }
+
+  // ==========================================================================
+  // Plugin Marketplace API
+  // ==========================================================================
+
+  // GET /api/plugins - List all available plugins
+  if (req.method === 'GET' && req.url === '/api/plugins') {
+    const plugins = pluginMarketplace.getAllPlugins()
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ ok: true, plugins }))
+    return
+  }
+
+  // GET /api/plugins/featured - Get featured plugins
+  if (req.method === 'GET' && req.url === '/api/plugins/featured') {
+    const plugins = pluginMarketplace.getFeaturedPlugins()
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ ok: true, plugins }))
+    return
+  }
+
+  // GET /api/plugins/official - Get official plugins
+  if (req.method === 'GET' && req.url === '/api/plugins/official') {
+    const plugins = pluginMarketplace.getOfficialPlugins()
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ ok: true, plugins }))
+    return
+  }
+
+  // GET /api/plugins/community - Get community plugins
+  if (req.method === 'GET' && req.url === '/api/plugins/community') {
+    const plugins = pluginMarketplace.getCommunityPlugins()
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ ok: true, plugins }))
+    return
+  }
+
+  // GET /api/plugins/categories - Get all plugin categories
+  if (req.method === 'GET' && req.url === '/api/plugins/categories') {
+    const categories = pluginMarketplace.getCategories()
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ ok: true, categories }))
+    return
+  }
+
+  // GET /api/plugins/installed - Get installed plugins
+  if (req.method === 'GET' && req.url === '/api/plugins/installed') {
+    const installed = pluginMarketplace.getInstalledPlugins()
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ ok: true, plugins: installed }))
+    return
+  }
+
+  // GET /api/plugins/search?q=query - Search for plugins
+  if (req.method === 'GET' && req.url?.startsWith('/api/plugins/search')) {
+    const urlObj = new URL(req.url, `http://localhost:${PORT}`)
+    const query = urlObj.searchParams.get('q') || ''
+    const results = pluginMarketplace.searchPlugins(query)
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ ok: true, plugins: results }))
+    return
+  }
+
+  // POST /api/plugins/install - Install a plugin
+  if (req.method === 'POST' && req.url === '/api/plugins/install') {
+    collectRequestBody(req)
+      .then(async (body) => {
+        try {
+          const { pluginId } = JSON.parse(body)
+          if (!pluginId) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ ok: false, error: 'pluginId is required' }))
+            return
+          }
+          const result = await pluginMarketplace.installPlugin(pluginId)
+          res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify(result))
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: 'Invalid JSON' }))
+        }
+      })
+      .catch(() => {
+        res.writeHead(413, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Request body too large' }))
+      })
+    return
+  }
+
+  // POST /api/plugins/uninstall - Uninstall a plugin
+  if (req.method === 'POST' && req.url === '/api/plugins/uninstall') {
+    collectRequestBody(req)
+      .then(async (body) => {
+        try {
+          const { pluginId } = JSON.parse(body)
+          if (!pluginId) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ ok: false, error: 'pluginId is required' }))
+            return
+          }
+          const result = await pluginMarketplace.uninstallPlugin(pluginId)
+          res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify(result))
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: 'Invalid JSON' }))
+        }
+      })
+      .catch(() => {
+        res.writeHead(413, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Request body too large' }))
+      })
+    return
+  }
+
+  // POST /api/plugins/toggle - Enable/disable a plugin
+  if (req.method === 'POST' && req.url === '/api/plugins/toggle') {
+    collectRequestBody(req)
+      .then(async (body) => {
+        try {
+          const { pluginId, enabled } = JSON.parse(body)
+          if (!pluginId || enabled === undefined) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ ok: false, error: 'pluginId and enabled are required' }))
+            return
+          }
+          const result = await pluginMarketplace.togglePlugin(pluginId, enabled)
           res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify(result))
         } catch (e) {
