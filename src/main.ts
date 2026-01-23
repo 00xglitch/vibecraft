@@ -3506,6 +3506,20 @@ function setupPluginsButton(): void {
     updateMcpServersList()
   })
 
+  // Marketplace buttons
+  const pluginMarketplaceBtn = document.getElementById('open-plugin-marketplace')
+  const mcpMarketplaceBtn = document.getElementById('open-mcp-marketplace')
+
+  pluginMarketplaceBtn?.addEventListener('click', async () => {
+    const { show: showPluginMarketplace } = await import('./ui/PluginMarketplaceModal')
+    showPluginMarketplace()
+  })
+
+  mcpMarketplaceBtn?.addEventListener('click', async () => {
+    const { show: showMCPMarketplace } = await import('./ui/MCPMarketplaceModal')
+    showMCPMarketplace()
+  })
+
   // Tab switching
   const tabs = modal.querySelectorAll('.plugins-tab')
   tabs.forEach((tab) => {

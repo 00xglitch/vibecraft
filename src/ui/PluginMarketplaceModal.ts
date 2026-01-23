@@ -1,12 +1,12 @@
 /**
- * MCP Marketplace Modal - Simplified version
+ * Plugin Marketplace Modal - Simplified version
  */
 
 import { toast } from './Toast'
 
 let modal: HTMLElement | null = null
 
-export interface MarketplaceMCP {
+export interface MarketplacePlugin {
   id: string
   name: string
   description: string
@@ -16,19 +16,19 @@ export interface MarketplaceMCP {
 export function show(): void {
   if (!modal) {
     modal = document.createElement('div')
-    modal.id = 'mcp-marketplace-modal'
+    modal.id = 'plugin-marketplace-modal'
     modal.className = 'modal'
     modal.innerHTML =
-      '<div class="modal-content marketplace-modal-content"><div class="modal-header"><h3>MCP Server Marketplace</h3><button id="mm-close">×</button></div><div class="marketplace-list"><p>MCP marketplace coming soon!</p></div></div>'
+      '<div class="modal-content marketplace-modal-content"><div class="modal-header"><h3>Plugin Marketplace</h3><button id="pm-close">×</button></div><div class="marketplace-list"><p>Plugin marketplace coming soon!</p></div></div>'
     document.body.appendChild(modal)
 
-    modal.querySelector('#mm-close')?.addEventListener('click', hide)
+    modal.querySelector('#pm-close')?.addEventListener('click', hide)
     modal.addEventListener('click', (e) => {
       if (e.target === modal) hide()
     })
   }
   modal.classList.add('show')
-  toast.info('MCP Marketplace', { icon: '🔌', duration: 2000 })
+  toast.info('Plugin Marketplace', { icon: '🔌', duration: 2000 })
 }
 
 export function hide(): void {
