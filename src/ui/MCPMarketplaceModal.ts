@@ -10,6 +10,7 @@
  */
 
 import { toast } from './Toast'
+import type { ManagedSession } from '../../shared/types'
 
 let modal: HTMLElement | null = null
 let activeTab: 'marketplace' | 'installed' = 'marketplace'
@@ -18,6 +19,7 @@ let installedServers: InstalledMCPServer[] = []
 let categories: string[] = []
 let searchQuery = ''
 let selectedCategory: string | null = null
+let currentSession: ManagedSession | null = null
 
 interface MCPServer {
   id: string
@@ -36,9 +38,34 @@ interface InstalledMCPServer extends MCPServer {
   configuredEnv: Record<string, string>
 }
 
-export async function show(): Promise<void> {
+export async function show(sessionId?: string): Promise<void> {
   if (!modal) {
     createModal()
+  }
+
+  // Fetch session if provided
+  if (sessionId) {
+    try {
+      const res = await fetch(`/sessions/${sessionId}`)
+      const data = await res.json()
+      if (data.ok) {
+        currentSession = data.session
+      }
+    } catch (err) {
+      console.error('[MCPMarketplace] Failed to fetch session:', err)
+    }
+  } else {
+    currentSession = null
+  }
+
+  // Update modal title
+  const title = modal!.querySelector('.plugins-modal-title')
+  if (title) {
+    if (currentSession) {
+      title.textContent = `🔌 MCP Servers - ${currentSession.name}`
+    } else {
+      title.textContent = '🔌 MCP Server Marketplace'
+    }
   }
 
   // Fetch data
@@ -312,6 +339,7 @@ function renderSection(title: string, servers: MCPServer[]): HTMLElement {
 
 function createServerItem(server: MCPServer): HTMLElement {
   const isInstalled = installedServers.some((s) => s.id === server.id)
+  const isEnabledForSession = currentSession && currentSession.enabledMCPs?.includes(server.id)
 
   const item = document.createElement('div')
   item.className = 'plugin-modal-item'
@@ -344,18 +372,44 @@ function createServerItem(server: MCPServer): HTMLElement {
   item.appendChild(icon)
   item.appendChild(info)
 
+  // Actions container
+  const actions = document.createElement('div')
+  actions.style.cssText = 'display: flex; flex-direction: column; gap: 8px; align-items: flex-end;'
+
   if (isInstalled) {
+    // Show installed status
     const status = document.createElement('div')
     status.className = 'plugin-modal-status active'
     status.textContent = '✓ Installed'
-    item.appendChild(status)
+    actions.appendChild(status)
+
+    // If we're in session mode, show enable/disable toggle
+    if (currentSession) {
+      const toggleBtn = document.createElement('button')
+      toggleBtn.className = 'marketplace-btn'
+      if (isEnabledForSession) {
+        toggleBtn.textContent = 'Disable for Session'
+        toggleBtn.style.cssText =
+          'background: rgba(234, 179, 8, 0.15); border-color: rgba(234, 179, 8, 0.3); color: #fbbf24;'
+      } else {
+        toggleBtn.textContent = 'Enable for Session'
+        toggleBtn.style.cssText =
+          'background: rgba(34, 197, 94, 0.15); border-color: rgba(34, 197, 94, 0.3); color: #4ade80;'
+      }
+      toggleBtn.addEventListener('click', () =>
+        toggleMCPForSession(server.id, !isEnabledForSession)
+      )
+      actions.appendChild(toggleBtn)
+    }
   } else {
     const btn = document.createElement('button')
     btn.className = 'marketplace-btn'
     btn.textContent = 'Install'
     btn.addEventListener('click', () => installServer(server.id))
-    item.appendChild(btn)
+    actions.appendChild(btn)
   }
+
+  item.appendChild(actions)
 
   return item
 }
@@ -453,6 +507,40 @@ function createInstalledItem(server: InstalledMCPServer): HTMLElement {
   return item
 }
 
+async function toggleMCPForSession(serverId: string, enable: boolean): Promise<void> {
+  if (!currentSession) return
+
+  const server = servers.find((s) => s.id === serverId)
+  if (!server) return
+
+  try {
+    // Update session's enabled MCPs
+    const enabledMCPs = currentSession.enabledMCPs || []
+    const updatedMCPs = enable
+      ? [...enabledMCPs, serverId]
+      : enabledMCPs.filter((id) => id !== serverId)
+
+    const res = await fetch(`/sessions/${currentSession.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabledMCPs: updatedMCPs }),
+    })
+
+    const data = await res.json()
+
+    if (data.ok && data.session) {
+      currentSession = data.session
+      toast.success(`${server.name} ${enable ? 'enabled' : 'disabled'} for ${data.session.name}`)
+      renderContent()
+    } else {
+      toast.error(`Failed to ${enable ? 'enable' : 'disable'} MCP: ${data.error}`)
+    }
+  } catch (err) {
+    console.error('[MCPMarketplace] Toggle failed:', err)
+    toast.error('Toggle failed')
+  }
+}
+
 async function installServer(serverId: string): Promise<void> {
   const server = servers.find((s) => s.id === serverId)
   if (!server) return
@@ -479,6 +567,12 @@ async function installServer(serverId: string): Promise<void> {
     if (data.ok) {
       toast.success(`${server.name} installed successfully!`)
       await fetchInstalled()
+
+      // Auto-enable for current session if in session mode
+      if (currentSession) {
+        await toggleMCPForSession(serverId, true)
+      }
+
       renderContent()
     } else {
       toast.error(`Installation failed: ${data.error}`)

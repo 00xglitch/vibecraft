@@ -91,8 +91,10 @@ export class Wizard implements ICharacter {
 
     this.statusRing = this.createStatusRing()
 
+    // Hat is child of head so it follows head movement
+    this.head.add(this.hat)
+
     this.mesh.add(this.head)
-    this.mesh.add(this.hat)
     this.mesh.add(this.beard)
     this.mesh.add(this.body)
     this.mesh.add(this.leftArm)
@@ -546,7 +548,6 @@ export class Wizard implements ICharacter {
 
         // Head bob (rotation only for walking)
         this.head.rotation.x = Math.sin(this.bobTime * 8) * 0.03
-        this.hat.rotation.x = this.head.rotation.x * 0.5
 
         // Beard sways
         this.beard.rotation.z = Math.sin(this.bobTime * 6) * 0.05
@@ -573,10 +574,6 @@ export class Wizard implements ICharacter {
       // Head subtle movement (rotation only, not position)
       this.head.rotation.x = breathe * 0.3
       this.head.rotation.z = Math.sin(this.bobTime * 0.8) * 0.02
-
-      // Hat follows head
-      this.hat.rotation.x = this.head.rotation.x * 0.5
-      this.hat.rotation.z = this.head.rotation.z
 
       // Hat stars twinkle
       this.hat.children.forEach((child, i) => {
@@ -688,8 +685,7 @@ export class Wizard implements ICharacter {
     } else if (state === 'idle') {
       // Reset all positions and rotations
       this.head.rotation.set(0, 0, 0)
-      this.hat.position.y = this.hatBaseY
-      this.hat.rotation.set(0, 0, 0)
+      // Hat inherits head rotation, no need to reset separately
       this.body.position.y = this.bodyBaseY
       this.body.rotation.set(0, 0, 0)
       this.beard.position.y = this.beardBaseY

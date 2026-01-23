@@ -363,6 +363,10 @@ export interface ManagedSession {
   doubleShotActive?: boolean
   /** Double Shot Latte: count of auto-continues in current burst */
   doubleShotContinues?: number
+  /** Enabled plugin IDs for this session */
+  enabledPlugins?: string[]
+  /** Enabled MCP server IDs for this session */
+  enabledMCPs?: string[]
 }
 
 /** Git repository status */
@@ -457,6 +461,10 @@ export interface UpdateSessionRequest {
   sortOrder?: number
   /** Archive/unarchive session */
   archived?: boolean
+  /** Enabled plugin IDs for this session */
+  enabledPlugins?: string[]
+  /** Enabled MCP server IDs for this session */
+  enabledMCPs?: string[]
 }
 
 /** Request to send a prompt to a session */

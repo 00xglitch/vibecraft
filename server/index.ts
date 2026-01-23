@@ -3815,6 +3815,12 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
             if (updates.archived !== undefined) {
               session.archived = updates.archived
             }
+            if (updates.enabledPlugins !== undefined) {
+              session.enabledPlugins = updates.enabledPlugins
+            }
+            if (updates.enabledMCPs !== undefined) {
+              session.enabledMCPs = updates.enabledMCPs
+            }
 
             // Save sessions to disk
             saveSessions()
