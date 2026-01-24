@@ -1,5 +1,6 @@
 import Docker from 'dockerode'
 import path from 'path'
+import { homedir } from 'os'
 import type { ManagedSession } from '../shared/types.js'
 
 export class DockerSessionManager {
@@ -22,6 +23,10 @@ export class DockerSessionManager {
       memory?: string // Memory limit (default: 1G)
     }
   ): Promise<string> {
+    // Path to session-specific settings directory
+    const sessionSettingsDir = path.join(homedir(), '.vibecraft/sessions', session.id)
+    const settingsPath = `/root/.vibecraft/sessions/${session.id}/settings.json`
+
     const container = await this.docker.createContainer({
       Image: 'vibecraft-claude:latest',
       name: `vibecraft-session-${session.id}`,
@@ -31,9 +36,15 @@ export class DockerSessionManager {
         `VIBECRAFT_DATA_DIR=/root/.vibecraft/data`,
         `SESSION_ID=${session.id}`,
         `SESSION_NAME=${session.name}`,
+        `SESSION_SETTINGS_PATH=${settingsPath}`,
       ],
       HostConfig: {
-        Binds: [`${options.workspace}:/workspace:rw`, 'vibecraft-shared:/root/.vibecraft/data:rw'],
+        Binds: [
+          `${options.workspace}:/workspace:rw`,
+          'vibecraft-shared:/root/.vibecraft/data:rw',
+          // Mount session-specific settings (read-only for safety)
+          `${sessionSettingsDir}:/root/.vibecraft/sessions/${session.id}:ro`,
+        ],
         Memory: this.parseMemory(options.memory || '1G'),
         NetworkMode: options.network || 'vibecraft-net',
         RestartPolicy: { Name: 'unless-stopped' },
@@ -60,7 +71,7 @@ export class DockerSessionManager {
 
     const container = this.docker.getContainer(containerId)
 
-    // Start Claude in tmux inside the container
+    // Start Claude in tmux inside the container with session-specific settings
     const cmd = [
       'tmux',
       'new-session',
@@ -69,7 +80,7 @@ export class DockerSessionManager {
       tmuxSession,
       'bash',
       '-c',
-      `${claudeCommand} ${args.join(' ')}`,
+      `${claudeCommand} --settings "$SESSION_SETTINGS_PATH" ${args.join(' ')}`,
     ]
 
     const exec = await container.exec({

@@ -86,6 +86,7 @@ import {
   type EnvironmentInfo,
 } from './environment.js'
 import { DockerSessionManager } from './DockerSessionManager.js'
+import { SessionSettingsManager } from './SessionSettingsManager.js'
 import {
   toDisplayPath,
   toExecutionPath,
@@ -525,6 +526,9 @@ const projectsManager = new ProjectsManager()
 
 /** Docker container session manager */
 const dockerSessionManager = new DockerSessionManager()
+
+/** Session settings manager for per-session MCP/plugin configuration */
+const sessionSettingsManager = new SessionSettingsManager()
 
 /** File change tracker for rollback functionality */
 const changeTracker = new ChangeTracker({
@@ -1202,6 +1206,9 @@ async function createDockerSession(options: CreateSessionRequest): Promise<Manag
     projectsManager.addProject(workspace, name)
   }
 
+  // Generate session-specific settings
+  await sessionSettingsManager.generateSessionSettings(session)
+
   broadcastSessions()
   saveSessions()
 
@@ -1322,6 +1329,10 @@ async function createTmuxSession(options: CreateSessionRequest = {}): Promise<Ma
     claudeArgs.push('--thinking')
   }
 
+  // Add session-specific settings path
+  const sessionSettingsPath = join(homedir(), '.vibecraft/sessions', id, 'settings.json')
+  claudeArgs.push('--settings', sessionSettingsPath)
+
   const claudeCmd =
     claudeArgs.length > 0 ? `${claudeCommand} ${claudeArgs.join(' ')}` : claudeCommand
 
@@ -1383,11 +1394,24 @@ async function createTmuxSession(options: CreateSessionRequest = {}): Promise<Ma
           projectsManager.addProject(originalCwd, name)
         }
 
-        // Broadcast and persist
-        broadcastSessions()
-        saveSessions()
+        // Generate session-specific settings
+        sessionSettingsManager
+          .generateSessionSettings(session)
+          .then(() => {
+            // Broadcast and persist
+            broadcastSessions()
+            saveSessions()
 
-        resolve(session)
+            resolve(session)
+          })
+          .catch((err) => {
+            log(`Warning: Failed to generate session settings: ${err}`)
+            // Continue anyway - settings generation shouldn't block session creation
+            broadcastSessions()
+            saveSessions()
+
+            resolve(session)
+          })
       }
     )
   })
@@ -1537,6 +1561,16 @@ async function deleteSession(id: string): Promise<boolean> {
   return new Promise((resolve) => {
     // Helper to clean up and resolve
     const cleanup = async () => {
+      // Clean up Docker container if this is a Docker session
+      if (session.runtime === 'docker' && session.containerId) {
+        log(`Stopping Docker container for session ${session.name}...`)
+        try {
+          await dockerSessionManager.stopContainer(id)
+        } catch (err) {
+          log(`Warning: Failed to stop Docker container: ${err}`)
+        }
+      }
+
       // Clean up worktree if this session used one
       if (session.worktree) {
         log(`Cleaning up worktree for session ${session.name}...`)
@@ -1546,6 +1580,9 @@ async function deleteSession(id: string): Promise<boolean> {
           session.worktree.branch
         )
       }
+
+      // Delete session settings
+      await sessionSettingsManager.deleteSessionSettings(id)
 
       // Clean up all session maps
       if (session.tmuxSession) {
@@ -4080,6 +4117,15 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
             }
             if (updates.enabledMCPs !== undefined) {
               session.enabledMCPs = updates.enabledMCPs
+            }
+
+            // Regenerate settings if MCP/plugin config changed
+            const settingsChanged =
+              updates.enabledMCPs !== undefined || updates.enabledPlugins !== undefined
+            if (settingsChanged) {
+              sessionSettingsManager.updateSessionSettings(session).catch((err) => {
+                log(`Warning: Failed to update session settings: ${err}`)
+              })
             }
 
             // Save sessions to disk
