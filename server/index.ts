@@ -25,6 +25,7 @@ import {
   statSync,
 } from 'fs'
 import { exec, execFile } from 'child_process'
+import { promisify } from 'util'
 import { dirname, resolve, join, extname } from 'path'
 import { hostname, homedir } from 'os'
 import { randomUUID, randomBytes } from 'crypto'
@@ -103,6 +104,9 @@ import {
   validatePath,
   getParentPath,
 } from './fileBrowser.js'
+
+// Promisified execFile with stdout/stderr for async/await usage
+const execFileWithOutput = promisify(execFile)
 
 // ============================================================================
 // OpenCode Integration State
@@ -1486,11 +1490,177 @@ function isDoubleeShotLatteDirectory(cwd: string | undefined): boolean {
 }
 
 /**
+ * Check if a process is running Claude CLI
+ */
+async function checkProcessForClaude(pid: string): Promise<boolean> {
+  try {
+    // Get process command line
+    const { stdout } = await execFileWithOutput('ps', ['-p', pid, '-o', 'command='])
+    const command = stdout.trim().toLowerCase()
+
+    // Check if it's a Claude process
+    return command.includes('claude') || (command.includes('node') && command.includes('.claude'))
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Check if a tmux session contains a Claude instance
+ */
+async function checkTmuxForClaudeSession(
+  tmuxName: string,
+  claudeSessionId: string,
+  cwd: string
+): Promise<boolean> {
+  try {
+    // Get pane info: PID, current path
+    const { stdout } = await execFileWithOutput('tmux', [
+      'list-panes',
+      '-t',
+      tmuxName,
+      '-F',
+      '#{pane_pid}:#{pane_current_path}',
+    ])
+
+    const panes = stdout.trim().split('\n')
+    for (const pane of panes) {
+      const [pid, path] = pane.split(':')
+
+      // Check if pane is running Claude in the expected directory
+      if (path === cwd || path.startsWith(cwd)) {
+        // Check process tree for claude command
+        const hasClaudeProcess = await checkProcessForClaude(pid)
+        if (hasClaudeProcess) {
+          return true
+        }
+      }
+    }
+
+    return false
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Check if a Docker container is running Claude
+ */
+async function checkContainerForClaude(containerId: string): Promise<boolean> {
+  try {
+    const container = dockerSessionManager.dockerClient.getContainer(containerId)
+
+    const exec = await container.exec({
+      Cmd: ['ps', 'aux'],
+      AttachStdout: true,
+      AttachStderr: true,
+    })
+
+    const stream = await exec.start({ Detach: false })
+
+    // Convert stream to string
+    const chunks: Buffer[] = []
+    await new Promise<void>((resolve, reject) => {
+      stream.on('data', (chunk) => chunks.push(Buffer.from(chunk)))
+      stream.on('end', () => resolve())
+      stream.on('error', reject)
+    })
+    const output = Buffer.concat(chunks).toString()
+
+    return output.toLowerCase().includes('claude')
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Try to detect the Docker container ID for an external Claude instance
+ */
+async function detectDockerContainerId(
+  claudeSessionId: string,
+  cwd: string
+): Promise<string | null> {
+  try {
+    // List all running containers
+    const containers = await dockerSessionManager.dockerClient.listContainers({
+      filters: { status: ['running'] },
+    })
+
+    for (const containerInfo of containers) {
+      const container = dockerSessionManager.dockerClient.getContainer(containerInfo.Id)
+      const inspect = await container.inspect()
+
+      // Check environment variables for session ID
+      const env = inspect.Config.Env || []
+      const hasSessionId = env.some(
+        (e) => e.includes(claudeSessionId) || e.includes(`CLAUDE_SESSION_ID=${claudeSessionId}`)
+      )
+
+      if (hasSessionId) {
+        log(`Found Docker container for external session: ${containerInfo.Id.slice(0, 12)}`)
+        return containerInfo.Id
+      }
+
+      // Check working directory and look for Claude process
+      if (inspect.Config.WorkingDir === cwd || inspect.Config.WorkingDir?.includes(cwd)) {
+        const hasClaudeProcess = await checkContainerForClaude(containerInfo.Id)
+        if (hasClaudeProcess) {
+          log(`Found Docker container by cwd match: ${containerInfo.Id.slice(0, 12)}`)
+          return containerInfo.Id
+        }
+      }
+    }
+
+    return null
+  } catch (err) {
+    debug(`Failed to detect Docker container: ${err}`)
+    return null
+  }
+}
+
+/**
+ * Try to detect the real tmux session for an external Claude instance
+ * by looking at running tmux sessions that might contain this Claude
+ */
+async function detectExternalTmuxSession(
+  claudeSessionId: string,
+  cwd: string
+): Promise<string | null> {
+  try {
+    // List all tmux sessions
+    const { stdout } = await execFileWithOutput('tmux', ['list-sessions', '-F', '#{session_name}'])
+    const sessions = stdout.trim().split('\n').filter(Boolean)
+
+    // Check each tmux session for our Claude instance
+    for (const tmuxName of sessions) {
+      // Skip our own managed sessions
+      if (tmuxName.startsWith('vibe-') || tmuxName.startsWith('vibecraft-')) {
+        continue
+      }
+
+      // Check if this tmux session contains our Claude instance
+      const hasClaudeSession = await checkTmuxForClaudeSession(tmuxName, claudeSessionId, cwd)
+      if (hasClaudeSession) {
+        log(`Found external tmux session: ${tmuxName} for Claude ${claudeSessionId.slice(0, 8)}`)
+        return tmuxName
+      }
+    }
+
+    return null
+  } catch (err) {
+    debug(`Failed to detect external tmux session: ${err}`)
+    return null
+  }
+}
+
+/**
  * Create an implicit managed session for external Claude instances.
  * These sessions have no tmux control - they just track events from external Claude.
  * Returns null for DSL sessions which shouldn't be tracked.
  */
-function createImplicitSession(options: CreateImplicitSessionRequest): ManagedSession | null {
+async function createImplicitSession(
+  options: CreateImplicitSessionRequest
+): Promise<ManagedSession | null> {
   const { claudeSessionId, cwd } = options
 
   // Skip creating sessions for double-shot-latte (ephemeral hook sessions)
@@ -1509,19 +1679,49 @@ function createImplicitSession(options: CreateImplicitSessionRequest): ManagedSe
   const id = randomUUID()
   sessionCounter++
 
-  // Generate name from cwd or use generic "External Claude N"
-  const dirName = cwd ? cwd.split('/').pop() || cwd : null
-  const name = dirName ? `${dirName} (ext)` : `External ${sessionCounter}`
-
-  // Use placeholder tmux session name (won't be used for actual tmux operations)
-  const tmuxSession = `implicit-${claudeSessionId.slice(0, 8)}`
-
   // Detect runtime environment
   const env = getEnvironment()
   const environmentInfo = {
     type: env.type,
     isDocker: env.isDocker,
     isWSL: env.isWSL,
+  }
+
+  // *** NEW: Try to detect real tmux session or Docker container ***
+  let tmuxSession: string | null = null
+  let isRealTmux = false
+  let containerId: string | null = null
+
+  if (env.isDocker && cwd) {
+    // Try to find the Docker container
+    containerId = await detectDockerContainerId(claudeSessionId, cwd)
+    if (containerId) {
+      // Also try to detect tmux session inside container (assume default tmux naming)
+      tmuxSession = `vibecraft-${claudeSessionId.slice(0, 8)}`
+      isRealTmux = true
+      log(`Auto-linked Docker external session to container: ${containerId.slice(0, 12)}`)
+    }
+  } else if (cwd) {
+    // Only detect tmux on native/WSL (not in Docker host)
+    tmuxSession = await detectExternalTmuxSession(claudeSessionId, cwd)
+    if (tmuxSession) {
+      isRealTmux = true
+      log(`Auto-linked external session to tmux: ${tmuxSession}`)
+    }
+  }
+
+  // Fallback to placeholder if no real tmux found
+  if (!tmuxSession) {
+    tmuxSession = `implicit-${claudeSessionId.slice(0, 8)}`
+  }
+
+  // Generate name from cwd or use generic "External Claude N"
+  const dirName = cwd ? cwd.split('/').pop() || cwd : null
+  let name = dirName ? `${dirName}` : `External ${sessionCounter}`
+
+  // Add (ext) suffix only if we didn't find real tmux/container
+  if (!isRealTmux) {
+    name = dirName ? `${dirName} (ext)` : `External ${sessionCounter}`
   }
 
   const session: ManagedSession = {
@@ -1533,16 +1733,18 @@ function createImplicitSession(options: CreateImplicitSessionRequest): ManagedSe
     createdAt: Date.now(),
     lastActivity: Date.now(),
     cwd,
-    implicit: true, // Mark as implicit - no tmux control
+    implicit: !isRealTmux, // *** NEW: Not implicit if we found real tmux ***
+    linkedTmux: isRealTmux, // *** NEW: Flag for UI ***
+    containerId: containerId || undefined, // *** NEW: Docker container ID if detected ***
     environment: environmentInfo,
-    runtime: 'tmux', // Default to tmux runtime
+    runtime: env.isDocker ? 'docker' : 'tmux',
   }
 
   managedSessions.set(id, session)
   claudeToManagedMap.set(claudeSessionId, id)
 
   log(
-    `Created implicit session: ${name} (${id.slice(0, 8)}) for Claude ${claudeSessionId.slice(0, 8)}`
+    `Created ${isRealTmux ? 'linked' : 'implicit'} session: ${name} (${id.slice(0, 8)}) for Claude ${claudeSessionId.slice(0, 8)}`
   )
 
   // Track git status if cwd is provided
@@ -1726,17 +1928,53 @@ async function sendPromptToSession(
     return sendPromptToOpenCodeSession(session, prompt, { opencodeSessions, log })
   }
 
-  // Implicit sessions don't have tmux control - suggest restart to adopt
+  // Implicit sessions don't have tmux control - but try Docker exec if available
   if (isImplicitSession(session)) {
-    // Check if Docker environment - Docker sessions don't need tmux adoption
-    if (session.environment?.isDocker) {
-      return {
-        ok: false,
-        error:
-          'Cannot send prompts to external Docker sessions. Create a new managed container instead.',
+    // For Docker external sessions: Try to send via docker exec
+    if (session.environment?.isDocker && session.containerId && session.tmuxSession) {
+      try {
+        // Check if container is running
+        const isRunning = await dockerSessionManager.isContainerRunning(session.id)
+        if (!isRunning) {
+          return {
+            ok: false,
+            error:
+              'Docker container is not running. Cannot send prompts to external Docker session.',
+          }
+        }
+
+        // Send prompt via docker exec
+        await sendToDockerTmux(session.containerId, session.tmuxSession, prompt)
+        session.lastActivity = Date.now()
+        log(`Prompt sent to Docker external session ${session.name}: ${prompt.slice(0, 50)}...`)
+        return { ok: true }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return {
+          ok: false,
+          error: `Failed to send prompt to Docker session: ${msg}. Click restart (🔄) to create a managed container.`,
+        }
       }
     }
 
+    // For native/WSL: Check if we have real tmux (linkedTmux)
+    if (session.linkedTmux && session.tmuxSession) {
+      // We have a real tmux session - try sending to it
+      try {
+        await sendToTmuxSafe(session.tmuxSession, prompt)
+        session.lastActivity = Date.now()
+        log(`Prompt sent to linked external session ${session.name}: ${prompt.slice(0, 50)}...`)
+        return { ok: true }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return {
+          ok: false,
+          error: `Failed to send prompt: ${msg}`,
+        }
+      }
+    }
+
+    // Placeholder tmux - can't send
     return {
       ok: false,
       error: 'External session has no tmux control. Click restart (🔄) to adopt it.',
@@ -3204,7 +3442,7 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
   // Create an implicit session (external Claude, no tmux control)
   if (req.method === 'POST' && req.url === '/sessions/implicit') {
     collectRequestBody(req)
-      .then((body) => {
+      .then(async (body) => {
         try {
           if (!body) {
             res.writeHead(400, { 'Content-Type': 'application/json' })
@@ -3217,7 +3455,7 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
             res.end(JSON.stringify({ ok: false, error: 'claudeSessionId is required' }))
             return
           }
-          const session = createImplicitSession(options)
+          const session = await createImplicitSession(options)
           if (!session) {
             // DSL sessions are skipped - return 200 OK with null session
             res.writeHead(200, { 'Content-Type': 'application/json' })

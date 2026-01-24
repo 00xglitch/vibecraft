@@ -341,6 +341,8 @@ export interface ManagedSession {
   }
   /** Whether this is an implicit session (external Claude, no tmux control) */
   implicit?: boolean
+  /** Whether we've linked to a real external tmux session */
+  linkedTmux?: boolean
   /** Auto-detected project name (from package.json, pyproject.toml, git remote, or directory) */
   projectName?: string
   /** Source of the detected project name */
