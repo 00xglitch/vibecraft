@@ -3983,42 +3983,6 @@ function init() {
     },
   })
 
-  // Initialize streak system
-  const { streakSystem } = await import('./systems/StreakSystem')
-  await streakSystem.initialize()
-
-  // Track current streak for achievements
-  achievementSystem.trackStreak(streakSystem.getCurrentStreak())
-
-  // Show welcome toast on first visit
-  const hasSeenWelcome = localStorage.getItem('vibecraft-has-seen-welcome')
-  if (!hasSeenWelcome) {
-    localStorage.setItem('vibecraft-has-seen-welcome', 'true')
-    const { toast } = await import('./ui/Toast')
-    setTimeout(() => {
-      toast.info(
-        `Welcome to Vibecraft! 🎨\n\nTrack Claude Code's activity in real-time as a 3D workshop.\n\n• Earn achievements for milestones\n• Build daily streaks for bonus points\n• Unlock special characters and content\n\nPress Alt+A to view achievements anytime!`,
-        { duration: 15000 }
-      )
-    }, 1000)
-  }
-
-  // Listen for streak milestones
-  streakSystem.onMilestone((milestone) => {
-    import('./ui/Toast').then(({ toast }) => {
-      toast.success(milestone.message, { icon: '🔥', duration: 5000 })
-    })
-
-    // Track streak for achievements
-    achievementSystem.trackStreak(milestone.value)
-
-    // Play victory animation on Claude
-    const sessions = Array.from(state.sessions.values())
-    if (sessions.length > 0 && sessions[0].claude) {
-      sessions[0].claude.playIdleBehavior('victoryDance')
-    }
-  })
-
   // Hook confetti updates into render loop
   state.scene.onRender((delta) => {
     updateConfetti(delta)
@@ -4756,6 +4720,50 @@ function init() {
   }
 
   console.log('Vibecraft initialized (multi-session enabled)')
+
+  // Initialize streak system asynchronously (non-blocking)
+  import('./systems/StreakSystem')
+    .then(async ({ streakSystem }) => {
+      await streakSystem.initialize()
+
+      // Track current streak for achievements
+      achievementSystem.trackStreak(streakSystem.getCurrentStreak())
+
+      // Show welcome toast on first visit
+      const hasSeenWelcome = localStorage.getItem('vibecraft-has-seen-welcome')
+      if (!hasSeenWelcome) {
+        localStorage.setItem('vibecraft-has-seen-welcome', 'true')
+        const { toast } = await import('./ui/Toast')
+        setTimeout(() => {
+          toast.info(
+            `Welcome to Vibecraft! 🎨\n\nTrack Claude Code's activity in real-time as a 3D workshop.\n\n• Earn achievements for milestones\n• Build daily streaks for bonus points\n• Unlock special characters and content\n\nPress Alt+A to view achievements anytime!`,
+            { duration: 15000 }
+          )
+        }, 1000)
+      }
+
+      // Listen for streak milestones
+      streakSystem.onMilestone((milestone) => {
+        import('./ui/Toast').then(({ toast }) => {
+          toast.success(milestone.message, { icon: '🔥', duration: 5000 })
+        })
+
+        // Track streak for achievements
+        achievementSystem.trackStreak(milestone.value)
+
+        // Play victory animation on Claude
+        const sessions = Array.from(state.sessions.values())
+        if (sessions.length > 0 && sessions[0].claude) {
+          const claude = sessions[0].claude as any
+          if (typeof claude.playIdleBehavior === 'function') {
+            claude.playIdleBehavior('victoryDance')
+          }
+        }
+      })
+    })
+    .catch((error) => {
+      console.error('Failed to initialize streak system:', error)
+    })
 }
 
 // ============================================================================

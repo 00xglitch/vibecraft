@@ -24,17 +24,32 @@ export class SessionSettingsManager {
   /** Generate settings file for a session */
   async generateSessionSettings(session: ManagedSession): Promise<void> {
     const sessionDir = this.getSessionDir(session.id)
-    await fs.mkdir(sessionDir, { recursive: true })
 
-    const settings = {
-      mcpServers: this.buildMCPServers(session.enabledMCPs || []),
-      // Plugins would go here when implemented
+    try {
+      await fs.mkdir(sessionDir, { recursive: true })
+
+      const settings = {
+        mcpServers: this.buildMCPServers(session.enabledMCPs || []),
+        // Plugins would go here when implemented
+      }
+
+      const settingsPath = this.getSessionSettingsPath(session.id)
+      await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2))
+
+      console.log(
+        `[SessionSettings] Generated settings for session ${session.id} at ${settingsPath}`
+      )
+    } catch (err: any) {
+      if (err.code === 'EACCES') {
+        const error = new Error(
+          `Permission denied: Cannot write to ${sessionDir}. ` +
+            `Run: sudo chown -R $USER:$USER ~/.vibecraft/sessions`
+        )
+        error.cause = err
+        throw error
+      }
+      throw err
     }
-
-    const settingsPath = this.getSessionSettingsPath(session.id)
-    await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2))
-
-    console.log(`[SessionSettings] Generated settings for session ${session.id} at ${settingsPath}`)
   }
 
   /** Build MCP servers configuration */

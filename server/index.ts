@@ -38,6 +38,7 @@ import type {
   PreToolUseEvent,
   PostToolUseEvent,
   StopEvent,
+  NotificationEvent,
   ManagedSession,
   CreateSessionRequest,
   CreateImplicitSessionRequest,
@@ -3044,7 +3045,7 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
 
   // GET /api/user-stats - Fetch user stats (streak, preferences)
   if (req.method === 'GET' && req.url === '/api/user-stats') {
-    const statsPath = expandPath('~/.vibecraft/data/user-stats.json')
+    const statsPath = resolve(expandHome('~/.vibecraft/data/user-stats.json'))
     try {
       if (existsSync(statsPath)) {
         const data = JSON.parse(readFileSync(statsPath, 'utf-8'))
@@ -3085,7 +3086,7 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
       .then(async (body) => {
         try {
           const data = JSON.parse(body)
-          const statsPath = expandPath('~/.vibecraft/data/user-stats.json')
+          const statsPath = resolve(expandHome('~/.vibecraft/data/user-stats.json'))
 
           const updatedData = {
             ...data,
