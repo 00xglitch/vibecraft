@@ -226,6 +226,7 @@ interface AppState {
   // Sidebar state
   showArchivedSessions: boolean // Whether to show archived sessions
   draggingSessionId: string | null // Session being dragged for reorder
+  hasSeenArchivedNotice: boolean // Whether user has been notified about archived sessions
 }
 
 const state: AppState = {
@@ -255,6 +256,7 @@ const state: AppState = {
   // Sidebar state
   showArchivedSessions: false,
   draggingSessionId: null,
+  hasSeenArchivedNotice: false,
 }
 
 // Expose for console testing (can remove in production)
@@ -346,7 +348,10 @@ function renderManagedSessions(): void {
     toggleEl.className = 'session-archive-toggle'
     const toggleBtn = document.createElement('button')
     toggleBtn.className = 'archive-toggle-btn'
-    toggleBtn.textContent = `${state.showArchivedSessions ? '📦 Hide Archived' : '📦 Show Archived'} (${archivedCount})`
+    toggleBtn.textContent = state.showArchivedSessions
+      ? '📦 Hide Archived'
+      : `📦 Show Archived (${archivedCount})`
+    toggleBtn.title = `${archivedCount} archived session${archivedCount > 1 ? 's' : ''} hidden`
     toggleBtn.addEventListener('click', () => {
       state.showArchivedSessions = !state.showArchivedSessions
       renderManagedSessions()
@@ -3978,6 +3983,42 @@ function init() {
     },
   })
 
+  // Initialize streak system
+  const { streakSystem } = await import('./systems/StreakSystem')
+  await streakSystem.initialize()
+
+  // Track current streak for achievements
+  achievementSystem.trackStreak(streakSystem.getCurrentStreak())
+
+  // Show welcome toast on first visit
+  const hasSeenWelcome = localStorage.getItem('vibecraft-has-seen-welcome')
+  if (!hasSeenWelcome) {
+    localStorage.setItem('vibecraft-has-seen-welcome', 'true')
+    const { toast } = await import('./ui/Toast')
+    setTimeout(() => {
+      toast.info(
+        `Welcome to Vibecraft! 🎨\n\nTrack Claude Code's activity in real-time as a 3D workshop.\n\n• Earn achievements for milestones\n• Build daily streaks for bonus points\n• Unlock special characters and content\n\nPress Alt+A to view achievements anytime!`,
+        { duration: 15000 }
+      )
+    }, 1000)
+  }
+
+  // Listen for streak milestones
+  streakSystem.onMilestone((milestone) => {
+    import('./ui/Toast').then(({ toast }) => {
+      toast.success(milestone.message, { icon: '🔥', duration: 5000 })
+    })
+
+    // Track streak for achievements
+    achievementSystem.trackStreak(milestone.value)
+
+    // Play victory animation on Claude
+    const sessions = Array.from(state.sessions.values())
+    if (sessions.length > 0 && sessions[0].claude) {
+      sessions[0].claude.playIdleBehavior('victoryDance')
+    }
+  })
+
   // Hook confetti updates into render loop
   state.scene.onRender((delta) => {
     updateConfetti(delta)
@@ -4381,6 +4422,20 @@ function init() {
     state.managedSessions = sessions
     renderManagedSessions()
 
+    // One-time toast if archived sessions exist
+    const archivedCount = sessions.filter((s) => s.archived).length
+    if (archivedCount > 0 && !state.hasSeenArchivedNotice) {
+      state.hasSeenArchivedNotice = true
+      import('./ui/Toast').then(({ toast }) => {
+        toast.info(
+          `${archivedCount} archived session${archivedCount > 1 ? 's' : ''} hidden. Click "Show Archived" to view.`,
+          {
+            duration: 5000,
+          }
+        )
+      })
+    }
+
     // Sync zone labels with managed session names
     syncZoneLabels()
 
@@ -4419,7 +4474,7 @@ function init() {
     }
   })
 
-  // Handle permission prompts and text tiles
+  // Handle permission prompts, question prompts, and text tiles
   state.client.onRawMessage((message) => {
     if (message.type === 'permission_prompt') {
       const { sessionId, tool, context, options } = message.payload as {
@@ -4431,6 +4486,26 @@ function init() {
       showPermissionModal(sessionId, tool, context, options)
     } else if (message.type === 'permission_resolved') {
       hidePermissionModal()
+    } else if (message.type === 'question_prompt') {
+      // Handle AskUserQuestion prompts
+      const { sessionId, managedSessionId, questions } = message.payload as {
+        sessionId: string
+        managedSessionId: string | null
+        questions: Array<{
+          question: string
+          header: string
+          options: Array<{ label: string; description?: string }>
+          multiSelect: boolean
+        }>
+      }
+
+      import('./ui/QuestionModal').then(({ showQuestionModal }) => {
+        showQuestionModal({
+          sessionId,
+          managedSessionId,
+          questions,
+        })
+      })
     } else if (message.type === 'text_tiles') {
       // Update text tiles in scene
       const tiles = message.payload as import('../shared/types').TextTile[]

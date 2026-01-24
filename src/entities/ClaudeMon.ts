@@ -148,6 +148,7 @@ export class Claude implements ICharacter {
     this.options = { ...DEFAULT_OPTIONS, ...options }
     this.id = Math.random().toString(36).substring(2, 9)
     this.mesh = new THREE.Group()
+    this.mesh.renderOrder = 10 // Characters render above zones
 
     // Create body parts
     this.head = this.createHead()

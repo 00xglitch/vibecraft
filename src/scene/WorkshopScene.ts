@@ -1612,6 +1612,7 @@ export class WorkshopScene {
     const floor = new THREE.Mesh(floorGeometry, floorMaterial)
     floor.rotation.x = -Math.PI / 2
     floor.receiveShadow = true
+    floor.renderOrder = 0 // Zones render first
     group.add(floor)
 
     // Colored hex ring around zone (will pulse with activity)
@@ -1628,6 +1629,7 @@ export class WorkshopScene {
     const ring = new THREE.Mesh(ringGeometry, ringMaterial)
     ring.rotation.x = -Math.PI / 2
     ring.position.y = 0.02
+    ring.renderOrder = 1 // Ring above floor
     group.add(ring)
 
     // Center platform (keep as cylinder - looks like a pedestal)
@@ -1644,6 +1646,7 @@ export class WorkshopScene {
     platform.rotation.y = Math.PI / 6 // Align with hex
     platform.receiveShadow = true
     platform.castShadow = true
+    platform.renderOrder = 2 // Platform above ring
     group.add(platform)
 
     // No internal hex grid lines - zone floor is clean

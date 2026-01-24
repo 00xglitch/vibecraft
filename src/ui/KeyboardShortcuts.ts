@@ -285,6 +285,20 @@ export function setupKeyboardShortcuts(ctx: KeyboardShortcutContext): void {
       return
     }
 
+    // Alt+P for Plugin Marketplace
+    if (e.altKey && (e.key === 'p' || e.key === 'P')) {
+      e.preventDefault()
+      import('./PluginMarketplaceModal').then(({ show }) => show())
+      return
+    }
+
+    // Alt+M for MCP Marketplace
+    if (e.altKey && (e.key === 'm' || e.key === 'M')) {
+      e.preventDefault()
+      import('./MCPMarketplaceModal').then(({ show }) => show())
+      return
+    }
+
     // F for follow-active mode (only outside inputs)
     if (!inInput && (e.key === 'f' || e.key === 'F')) {
       ctx.onSetUserChangedCamera(true)

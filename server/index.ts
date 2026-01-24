@@ -1835,15 +1835,23 @@ async function deleteSession(id: string): Promise<boolean> {
       // Clean up worktree if this session used one
       if (session.worktree) {
         log(`Cleaning up worktree for session ${session.name}...`)
-        await removeWorktree(
-          session.worktree.path,
-          session.worktree.originalRepo,
-          session.worktree.branch
-        )
+        try {
+          await removeWorktree(
+            session.worktree.path,
+            session.worktree.originalRepo,
+            session.worktree.branch
+          )
+        } catch (err) {
+          log(`Warning: Failed to remove worktree: ${err}`)
+        }
       }
 
       // Delete session settings
-      await sessionSettingsManager.deleteSessionSettings(id)
+      try {
+        await sessionSettingsManager.deleteSessionSettings(id)
+      } catch (err) {
+        log(`Warning: Failed to delete session settings: ${err}`)
+      }
 
       // Clean up all session maps
       if (session.tmuxSession) {
@@ -2765,6 +2773,39 @@ function addEvent(event: ClaudeEvent) {
 
   // Broadcast to all clients
   broadcast({ type: 'event', payload: processed })
+
+  // Check for AskUserQuestion prompts (elicitation_dialog notifications)
+  if (event.type === 'notification') {
+    const notificationEvent = event as NotificationEvent
+    if (notificationEvent.notificationType === 'elicitation_dialog') {
+      try {
+        // Parse the message JSON (format from Claude Code AskUserQuestion tool)
+        const questionData = JSON.parse(notificationEvent.message)
+
+        // Find managed session for this Claude session
+        const managedSession = findManagedSession(event.sessionId)
+
+        // Broadcast as question_prompt WebSocket message
+        broadcast({
+          type: 'question_prompt',
+          payload: {
+            sessionId: event.sessionId,
+            managedSessionId: managedSession?.id || null,
+            questions: Array.isArray(questionData.questions)
+              ? questionData.questions
+              : [questionData],
+          },
+        })
+
+        log(
+          `Question prompt for session ${event.sessionId.slice(0, 8)}: ${questionData.questions?.[0]?.question || questionData.question}`
+        )
+      } catch (err) {
+        const error = err as Error
+        log(`Failed to parse elicitation_dialog: ${error.message}`)
+      }
+    }
+  }
 }
 
 // ============================================================================
@@ -2998,6 +3039,74 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
         voiceEnabled: !!deepgramApiKey,
       })
     )
+    return
+  }
+
+  // GET /api/user-stats - Fetch user stats (streak, preferences)
+  if (req.method === 'GET' && req.url === '/api/user-stats') {
+    const statsPath = expandPath('~/.vibecraft/data/user-stats.json')
+    try {
+      if (existsSync(statsPath)) {
+        const data = JSON.parse(readFileSync(statsPath, 'utf-8'))
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify(data))
+      } else {
+        // Return empty state
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(
+          JSON.stringify({
+            version: 1,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            streak: {
+              firstVisit: 0,
+              lastVisit: 0,
+              currentStreak: 0,
+              longestStreak: 0,
+              totalVisits: 0,
+              visitHistory: [],
+              lastSyncedAt: 0,
+            },
+            preferences: { hasSeenWelcome: false },
+            unlocks: {},
+          })
+        )
+      }
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Failed to load user stats' }))
+    }
+    return
+  }
+
+  // POST /api/user-stats - Update user stats
+  if (req.method === 'POST' && req.url === '/api/user-stats') {
+    collectRequestBody(req)
+      .then(async (body) => {
+        try {
+          const data = JSON.parse(body)
+          const statsPath = expandPath('~/.vibecraft/data/user-stats.json')
+
+          const updatedData = {
+            ...data,
+            version: 1,
+            updatedAt: Date.now(),
+          }
+
+          mkdirSync(dirname(statsPath), { recursive: true })
+          writeFileSync(statsPath, JSON.stringify(updatedData, null, 2))
+
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: true }))
+        } catch (e) {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Failed to save user stats' }))
+        }
+      })
+      .catch(() => {
+        res.writeHead(413, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Request body too large' }))
+      })
     return
   }
 

@@ -8,6 +8,9 @@
  * - Special events (git commits, etc.)
  */
 
+import { streakSystem } from './StreakSystem'
+import { toast } from '../ui/Toast'
+
 export type AchievementRarity = 'common' | 'rare' | 'epic' | 'legendary'
 
 export interface Achievement {
@@ -379,6 +382,68 @@ export const ACHIEVEMENTS: Achievement[] = [
     rarity: 'legendary',
     secret: true,
   },
+
+  // Streak achievements (milestones category)
+  {
+    id: 'streak_3',
+    name: 'Getting Started',
+    description: 'Visit Vibecraft 3 days in a row',
+    icon: '🔥',
+    category: 'milestones',
+    requirement: 3,
+    points: 25,
+    rarity: 'common',
+  },
+  {
+    id: 'streak_7',
+    name: 'Week Warrior',
+    description: 'Maintain a 7-day streak',
+    icon: '📅',
+    category: 'milestones',
+    requirement: 7,
+    points: 50,
+    rarity: 'rare',
+  },
+  {
+    id: 'streak_14',
+    name: 'Fortnight Fighter',
+    description: 'Maintain a 14-day streak',
+    icon: '⚡',
+    category: 'milestones',
+    requirement: 14,
+    points: 100,
+    rarity: 'epic',
+  },
+  {
+    id: 'streak_30',
+    name: 'Monthly Master',
+    description: 'Maintain a 30-day streak',
+    icon: '🌙',
+    category: 'milestones',
+    requirement: 30,
+    points: 150,
+    rarity: 'epic',
+  },
+  {
+    id: 'streak_100',
+    name: 'Century Club',
+    description: 'Maintain a 100-day streak',
+    icon: '💯',
+    category: 'milestones',
+    requirement: 100,
+    points: 500,
+    rarity: 'legendary',
+  },
+  {
+    id: 'streak_365',
+    name: 'Dedication Incarnate',
+    description: 'Maintain a 365-day streak',
+    icon: '🏆',
+    category: 'milestones',
+    requirement: 365,
+    points: 1000,
+    rarity: 'legendary',
+  },
 ]
 
 const STORAGE_KEY = 'vibecraft_achievements'
@@ -529,6 +594,20 @@ export class AchievementSystem {
   }
 
   /**
+   * Track daily streak progress
+   */
+  trackStreak(currentStreak: number): void {
+    this.checkAndUnlock('streak_3', currentStreak)
+    this.checkAndUnlock('streak_7', currentStreak)
+    this.checkAndUnlock('streak_14', currentStreak)
+    this.checkAndUnlock('streak_30', currentStreak)
+    this.checkAndUnlock('streak_100', currentStreak)
+    this.checkAndUnlock('streak_365', currentStreak)
+    this.checkCompletionist()
+    this.saveProgress()
+  }
+
+  /**
    * Check time-based achievements
    */
   checkTimeAchievements(): void {
@@ -583,7 +662,22 @@ export class AchievementSystem {
     // Check if requirement met
     if (currentValue >= achievement.requirement) {
       this.progress.achievements[achievementId].unlockedAt = Date.now()
-      this.progress.totalPoints += achievement.points
+
+      // Apply streak multiplier to points
+      const basePoints = achievement.points
+      const multiplier = streakSystem.getActiveMultiplier()
+      const bonusPoints = Math.floor(basePoints * (multiplier - 1.0))
+      const totalPoints = basePoints + bonusPoints
+
+      this.progress.totalPoints += totalPoints
+
+      // Show toast with bonus if applicable
+      if (bonusPoints > 0) {
+        toast.success(
+          `${achievement.name} unlocked! +${basePoints} points (+${bonusPoints} streak bonus)`,
+          { duration: 5000, icon: '🔥' }
+        )
+      }
 
       // Notify listeners
       this.listeners.forEach((listener) => listener(achievement))

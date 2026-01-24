@@ -161,6 +161,14 @@ export interface PermissionOption {
   label: string // "Yes", "Yes, and always allow...", "No"
 }
 
+/** Question data for AskUserQuestion prompts */
+export interface QuestionData {
+  question: string
+  header: string
+  options: Array<{ label: string; description?: string }>
+  multiSelect: boolean
+}
+
 /** Server -> Client messages */
 export type ServerMessage =
   | { type: 'event'; payload: ClaudeEvent }
@@ -178,6 +186,10 @@ export type ServerMessage =
       payload: { sessionId: string; tool: string; context: string; options: PermissionOption[] }
     }
   | { type: 'permission_resolved'; payload: { sessionId: string } }
+  | {
+      type: 'question_prompt'
+      payload: { sessionId: string; managedSessionId: string | null; questions: QuestionData[] }
+    }
   | { type: 'text_tiles'; payload: TextTile[] }
   | { type: 'workspaces'; payload: Workspace[] }
   | { type: 'workspace_update'; payload: Workspace }
