@@ -465,6 +465,65 @@ async function sendToTmuxSafe(tmuxSession: string, text: string): Promise<void> 
   }
 }
 
+/**
+ * Send text to tmux session inside a Docker container
+ */
+async function sendToDockerTmux(
+  containerId: string,
+  tmuxSession: string,
+  text: string
+): Promise<void> {
+  // Validate session name
+  validateTmuxSession(tmuxSession)
+
+  const container = dockerSessionManager.dockerClient.getContainer(containerId)
+
+  // Create temp file inside container
+  const tempFile = `/tmp/vibecraft-prompt-${Date.now()}-${randomBytes(16).toString('hex')}.txt`
+
+  // Write text to temp file in container
+  const writeExec = await container.exec({
+    Cmd: ['sh', '-c', `cat > ${tempFile}`],
+    AttachStdin: true,
+    AttachStdout: true,
+    AttachStderr: true,
+  })
+
+  const stream = await writeExec.start({ hijack: true, stdin: true })
+  stream.write(text)
+  stream.end()
+
+  try {
+    // Load text into tmux buffer inside container
+    await execInContainer(container, ['tmux', 'load-buffer', tempFile])
+    // Paste buffer into session
+    await execInContainer(container, ['tmux', 'paste-buffer', '-t', tmuxSession])
+    // Send Enter to submit
+    await new Promise((r) => setTimeout(r, 100))
+    await execInContainer(container, ['tmux', 'send-keys', '-t', tmuxSession, 'Enter'])
+  } finally {
+    // Clean up temp file inside container
+    try {
+      await execInContainer(container, ['rm', '-f', tempFile])
+    } catch (e) {
+      // Ignore cleanup errors
+    }
+  }
+}
+
+/**
+ * Execute command in Docker container
+ */
+async function execInContainer(container: any, cmd: string[]): Promise<void> {
+  const exec = await container.exec({
+    Cmd: cmd,
+    AttachStdout: true,
+    AttachStderr: true,
+  })
+
+  await exec.start({ Detach: false })
+}
+
 // ============================================================================
 // State
 // ============================================================================
@@ -1674,7 +1733,7 @@ async function sendPromptToSession(
       return {
         ok: false,
         error:
-          'Cannot send prompts to external Docker sessions. Adopt the session or create a new managed container.',
+          'Cannot send prompts to external Docker sessions. Create a new managed container instead.',
       }
     }
 
@@ -1689,7 +1748,27 @@ async function sendPromptToSession(
   }
 
   try {
-    await sendToTmuxSafe(session.tmuxSession, prompt)
+    // Send to Docker container tmux or local tmux
+    if (session.runtime === 'docker') {
+      if (!session.containerId) {
+        return { ok: false, error: 'Docker session has no container ID' }
+      }
+
+      // Check if container is running
+      const isRunning = await dockerSessionManager.isContainerRunning(id)
+      if (!isRunning) {
+        return {
+          ok: false,
+          error: 'Docker container is not running. Restart the session to continue.',
+        }
+      }
+
+      await sendToDockerTmux(session.containerId, session.tmuxSession, prompt)
+    } else {
+      // Local tmux session
+      await sendToTmuxSafe(session.tmuxSession, prompt)
+    }
+
     session.lastActivity = Date.now()
     log(`Prompt sent to ${session.name}: ${prompt.slice(0, 50)}...`)
     return { ok: true }
@@ -4217,6 +4296,29 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
         return
       }
 
+      // Handle Docker sessions differently
+      if (session.runtime === 'docker' && session.containerId) {
+        const container = dockerSessionManager.dockerClient.getContainer(session.containerId)
+        container
+          .exec({
+            Cmd: ['tmux', 'send-keys', '-t', session.tmuxSession, 'C-c'],
+            AttachStdout: true,
+            AttachStderr: true,
+          })
+          .then((exec: any) => exec.start({ Detach: false }))
+          .then(() => {
+            log(`Sent Ctrl+C to Docker session ${session.name}`)
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ ok: true }))
+          })
+          .catch((error: Error) => {
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ ok: false, error: error.message }))
+          })
+        return
+      }
+
+      // Local tmux session
       execFile('tmux', ['send-keys', '-t', session.tmuxSession, 'C-c'], EXEC_OPTIONS, (error) => {
         res.writeHead(200, { 'Content-Type': 'application/json' })
         if (error) {
