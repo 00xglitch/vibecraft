@@ -27,32 +27,46 @@ export class DockerSessionManager {
     const sessionSettingsDir = path.join(homedir(), '.vibecraft/sessions', session.id)
     const settingsPath = `/root/.vibecraft/sessions/${session.id}/settings.json`
 
-    const container = await this.docker.createContainer({
-      Image: 'vibecraft-claude:latest',
-      name: `vibecraft-session-${session.id}`,
-      Env: [
-        `ANTHROPIC_API_KEY=${options.apiKey}`,
-        `VIBECRAFT_WS_NOTIFY=http://vibecraft-hub:4003/event`,
-        `VIBECRAFT_DATA_DIR=/root/.vibecraft/data`,
-        `SESSION_ID=${session.id}`,
-        `SESSION_NAME=${session.name}`,
-        `SESSION_SETTINGS_PATH=${settingsPath}`,
-      ],
-      HostConfig: {
-        Binds: [
-          `${options.workspace}:/workspace:rw`,
-          'vibecraft-shared:/root/.vibecraft/data:rw',
-          // Mount session-specific settings (read-only for safety)
-          `${sessionSettingsDir}:/root/.vibecraft/sessions/${session.id}:ro`,
+    let container
+    try {
+      container = await this.docker.createContainer({
+        Image: 'vibecraft-claude:latest',
+        name: `vibecraft-session-${session.id}`,
+        Env: [
+          `ANTHROPIC_API_KEY=${options.apiKey}`,
+          `VIBECRAFT_WS_NOTIFY=http://vibecraft-hub:4003/event`,
+          `VIBECRAFT_DATA_DIR=/root/.vibecraft/data`,
+          `SESSION_ID=${session.id}`,
+          `SESSION_NAME=${session.name}`,
+          `SESSION_SETTINGS_PATH=${settingsPath}`,
         ],
-        Memory: this.parseMemory(options.memory || '1G'),
-        NetworkMode: options.network || 'vibecraft-net',
-        RestartPolicy: { Name: 'unless-stopped' },
-      },
-      WorkingDir: '/workspace',
-      Tty: true,
-      OpenStdin: true,
-    })
+        HostConfig: {
+          Binds: [
+            `${options.workspace}:/workspace:rw`,
+            'vibecraft-shared:/root/.vibecraft/data:rw',
+            // Mount session-specific settings (read-only for safety)
+            `${sessionSettingsDir}:/root/.vibecraft/sessions/${session.id}:ro`,
+          ],
+          Memory: this.parseMemory(options.memory || '1G'),
+          NetworkMode: options.network || 'vibecraft-net',
+          RestartPolicy: { Name: 'unless-stopped' },
+        },
+        WorkingDir: '/workspace',
+        Tty: true,
+        OpenStdin: true,
+      })
+    } catch (err: any) {
+      // Check if it's a missing image error
+      if (err.statusCode === 404 && err.message?.includes('No such image')) {
+        throw new Error(
+          'Docker image "vibecraft-claude:latest" not found. ' +
+            'Please build the image first:\n' +
+            '  docker build -f Dockerfile.claude -t vibecraft-claude:latest .\n' +
+            'Or run: bash build-docker-image.sh'
+        )
+      }
+      throw err
+    }
 
     await container.start()
     this.containerMap.set(session.id, container.id)
