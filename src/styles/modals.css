@@ -315,6 +315,138 @@
   display: block;
 }
 
+/* Runtime Tabs (Docker/Local) */
+.runtime-tabs {
+  display: flex;
+  gap: 4px;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 4px;
+  border-radius: 8px;
+  margin-top: 8px;
+  margin-bottom: 12px;
+}
+
+.runtime-tab {
+  flex: 1;
+  padding: 8px 16px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.runtime-tab:hover {
+  color: rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.runtime-tab.active {
+  background: rgba(74, 200, 232, 0.2);
+  color: #4ac8e8;
+  font-weight: 600;
+}
+
+.runtime-tab[data-runtime='docker'].active {
+  background: rgba(59, 130, 246, 0.2);
+  color: #3b82f6;
+}
+
+/* Runtime Content Panels */
+.runtime-content {
+  margin-top: 12px;
+}
+
+.runtime-panel {
+  display: none;
+}
+
+.runtime-panel.active {
+  display: block;
+}
+
+/* Compact Field Styles */
+.modal-field-compact {
+  margin-bottom: 12px;
+}
+
+.modal-field-compact label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.6);
+  margin-bottom: 6px;
+}
+
+.modal-select-sm {
+  width: 100%;
+  padding: 8px 10px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.modal-select-sm:hover {
+  border-color: rgba(167, 139, 250, 0.4);
+}
+
+.modal-select-sm:focus {
+  outline: none;
+  border-color: #8b5cf6;
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.2);
+}
+
+.modal-select-sm option {
+  background: #1e293b;
+  color: #fff;
+}
+
+/* Compact Checkboxes */
+.modal-checkboxes-compact {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.modal-checkbox-compact {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.modal-checkbox-compact:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.modal-checkbox-compact input[type='checkbox'] {
+  accent-color: #a78bfa;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.modal-checkbox-compact span {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.85);
+  line-height: 1.2;
+}
+
 /* Modal Select */
 .modal-select {
   width: 100%;

@@ -48,7 +48,8 @@ export function setupNewSessionModal(
       cwd: string,
       flags: SessionFlags,
       runtime?: SessionRuntime,
-      docker?: DockerOptions
+      docker?: DockerOptions,
+      shell?: string
     ) => void
     onOpenCodeSession: (data: {
       name?: string
@@ -235,15 +236,16 @@ export function setupNewSessionModal(
         model: modelSelect?.value || undefined,
       }
 
-      // Read runtime selector
-      const runtimeRadios = document.querySelectorAll<HTMLInputElement>('input[name="runtime"]')
-      let runtime: SessionRuntime = 'tmux'
-      for (const radio of runtimeRadios) {
-        if (radio.checked) {
-          runtime = radio.value as SessionRuntime
-          break
-        }
-      }
+      // Read runtime from active tab
+      const activeRuntimeTab = document.querySelector('.runtime-tab.active') as HTMLButtonElement
+      const runtime: SessionRuntime =
+        (activeRuntimeTab?.dataset?.runtime as SessionRuntime) || 'tmux'
+
+      // Read shell from appropriate dropdown based on runtime
+      const shellDropdown = document.getElementById(
+        runtime === 'docker' ? 'session-opt-shell-docker' : 'session-opt-shell-tmux'
+      ) as HTMLSelectElement
+      const shell = shellDropdown?.value || 'bash'
 
       // Read Docker options if Docker runtime selected
       let dockerOptions: DockerOptions | undefined
@@ -256,7 +258,7 @@ export function setupNewSessionModal(
       }
 
       // Create Claude session
-      callbacks.onClaudeSession(name || '', cwd || '', flags, runtime, dockerOptions)
+      callbacks.onClaudeSession(name || '', cwd || '', flags, runtime, dockerOptions, shell)
     }
   }
 
@@ -276,14 +278,27 @@ export function setupNewSessionModal(
   cancelBtn?.addEventListener('click', handleCancel)
   createBtn?.addEventListener('click', handleCreate)
 
-  // Toggle docker options visibility based on runtime selection
-  const runtimeRadios = document.querySelectorAll<HTMLInputElement>('input[name="runtime"]')
-  const dockerOptionsDiv = document.getElementById('docker-options')
-  runtimeRadios.forEach((radio) => {
-    radio.addEventListener('change', () => {
-      if (dockerOptionsDiv) {
-        dockerOptionsDiv.style.display = radio.value === 'docker' ? 'block' : 'none'
-      }
+  // Setup runtime tab switching
+  const runtimeTabs = document.querySelectorAll('.runtime-tab')
+  const runtimePanels = document.querySelectorAll('.runtime-panel')
+
+  runtimeTabs.forEach((tab) => {
+    tab.addEventListener('click', () => {
+      const targetRuntime = (tab as HTMLButtonElement).dataset.runtime
+
+      // Update active states on tabs
+      runtimeTabs.forEach((t) => t.classList.remove('active'))
+      tab.classList.add('active')
+
+      // Show corresponding panel
+      runtimePanels.forEach((panel) => {
+        const panelId = panel.id
+        if (panelId === `runtime-${targetRuntime}-panel`) {
+          panel.classList.add('active')
+        } else {
+          panel.classList.remove('active')
+        }
+      })
     })
   })
 

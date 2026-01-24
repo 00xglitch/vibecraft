@@ -625,9 +625,10 @@ async function createManagedSession(
   hintPosition?: { x: number; z: number },
   pendingZoneId?: string,
   runtime?: import('./api/SessionAPI').SessionRuntime,
-  docker?: import('./api/SessionAPI').DockerOptions
+  docker?: import('./api/SessionAPI').DockerOptions,
+  shell?: string
 ): Promise<void> {
-  const data = await sessionAPI.createSession(name, cwd, flags, runtime, docker)
+  const data = await sessionAPI.createSession(name, cwd, flags, runtime, docker, shell)
 
   if (!data.ok) {
     console.error('Failed to create session:', data.error)
@@ -904,7 +905,7 @@ function setupManagedSessions(): void {
   const opencodeModelField = document.getElementById('opencode-model-field')
 
   const opencodeState = setupNewSessionModal(modal!, {
-    onClaudeSession: (name, cwd, flags, runtime, docker) => {
+    onClaudeSession: (name, cwd, flags, runtime, docker, shell) => {
       createManagedSession(
         name,
         cwd,
@@ -912,7 +913,8 @@ function setupManagedSessions(): void {
         currentModalHint ?? undefined,
         `pending-${Date.now()}`,
         runtime,
-        docker
+        docker,
+        shell
       )
       closeModal()
     },

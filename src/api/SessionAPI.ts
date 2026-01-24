@@ -52,13 +52,14 @@ export function createSessionAPI(apiUrl: string) {
       cwd?: string,
       flags?: SessionFlags,
       runtime?: SessionRuntime,
-      docker?: DockerOptions
+      docker?: DockerOptions,
+      shell?: string
     ): Promise<CreateSessionResponse> {
       try {
         const response = await fetch(`${apiUrl}/sessions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, cwd, flags, runtime, docker }),
+          body: JSON.stringify({ name, cwd, flags, runtime, docker, shell }),
         })
         return await response.json()
       } catch (e) {

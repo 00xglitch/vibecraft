@@ -327,62 +327,81 @@
 
         <!-- Claude Options -->
         <div class="modal-field" id="claude-options">
-          <label>Runtime Environment</label>
-          <div class="modal-checkboxes" style="margin-bottom: 12px">
-            <label class="modal-checkbox">
-              <input type="radio" name="runtime" value="tmux" checked />
-              <span class="checkbox-label">Local (tmux)</span>
-            </label>
-            <label class="modal-checkbox">
-              <input type="radio" name="runtime" value="docker" />
-              <span class="checkbox-label">Docker Container 🐳</span>
-            </label>
+          <label>Runtime</label>
+          <div class="runtime-tabs">
+            <button type="button" class="runtime-tab active" data-runtime="tmux">Local</button>
+            <button type="button" class="runtime-tab" data-runtime="docker">Docker</button>
           </div>
 
-          <!-- Docker-specific options (shown when docker selected) -->
-          <div id="docker-options" class="modal-field" style="display: none; margin-left: 20px; margin-bottom: 12px;">
-            <label>Memory Limit</label>
-            <select id="session-opt-memory" class="modal-select" style="width: 160px">
-              <option value="512M">512 MB</option>
-              <option value="1G" selected>1 GB</option>
-              <option value="2G">2 GB</option>
-              <option value="4G">4 GB</option>
-            </select>
+          <!-- Runtime-specific content -->
+          <div class="runtime-content">
+            <!-- Local (tmux) options -->
+            <div class="runtime-panel active" id="runtime-tmux-panel">
+              <div class="modal-field-compact">
+                <label>Shell</label>
+                <select id="session-opt-shell-tmux" class="modal-select-sm">
+                  <option value="bash">Bash</option>
+                  <option value="zsh">Zsh</option>
+                  <option value="fish">Fish</option>
+                  <option value="sh">Sh</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Docker options -->
+            <div class="runtime-panel" id="runtime-docker-panel">
+              <div class="modal-field-compact">
+                <label>Memory</label>
+                <select id="session-opt-memory" class="modal-select-sm">
+                  <option value="512M">512 MB</option>
+                  <option value="1G" selected>1 GB</option>
+                  <option value="2G">2 GB</option>
+                  <option value="4G">4 GB</option>
+                </select>
+              </div>
+              <div class="modal-field-compact">
+                <label>Shell</label>
+                <select id="session-opt-shell-docker" class="modal-select-sm">
+                  <option value="bash">Bash</option>
+                  <option value="zsh">Zsh</option>
+                  <option value="fish">Fish</option>
+                  <option value="sh">Sh</option>
+                </select>
+              </div>
+            </div>
           </div>
 
           <label>Model</label>
-          <div class="settings-select-row" style="margin-bottom: 12px">
-            <select id="session-opt-model" class="modal-select" style="width: 160px">
-              <option value="">Default</option>
-              <option value="sonnet">Sonnet</option>
-              <option value="opus">Opus</option>
-              <option value="haiku">Haiku</option>
-            </select>
-          </div>
+          <select id="session-opt-model" class="modal-select-sm">
+            <option value="">Default</option>
+            <option value="sonnet">Sonnet</option>
+            <option value="opus">Opus</option>
+            <option value="haiku">Haiku</option>
+          </select>
+
           <label>Options</label>
-          <div class="modal-checkboxes">
-            <label class="modal-checkbox">
+          <div class="modal-checkboxes-compact">
+            <label class="modal-checkbox-compact">
               <input type="checkbox" id="session-opt-thinking" />
-              <span class="checkbox-label">Extended thinking <code>--thinking</code></span>
+              <span>Extended thinking</span>
             </label>
-            <label class="modal-checkbox">
+            <label class="modal-checkbox-compact">
               <input type="checkbox" id="session-opt-continue" />
-              <span class="checkbox-label">Continue <code>-c</code></span>
+              <span>Continue</span>
             </label>
-            <label class="modal-checkbox">
+            <label class="modal-checkbox-compact">
               <input type="checkbox" id="session-opt-skip-perms" checked />
-              <span class="checkbox-label">Skip permissions <code>--dangerously-skip-permissions</code></span>
+              <span>Skip permissions</span>
             </label>
-            <label class="modal-checkbox">
+            <label class="modal-checkbox-compact">
               <input type="checkbox" id="session-opt-chrome" />
-              <span class="checkbox-label">Chrome <code>--chrome</code></span>
+              <span>Chrome</span>
             </label>
-            <label class="modal-checkbox">
+            <label class="modal-checkbox-compact">
               <input type="checkbox" id="session-opt-worktree" />
-              <span class="checkbox-label">Isolate with git worktree</span>
+              <span>Git worktree</span>
             </label>
           </div>
-          <div class="field-hint" id="worktree-hint">Creates a separate branch and working directory for isolation</div>
         </div>
 
         <!-- OpenCode Options -->
