@@ -2,7 +2,7 @@ import * as THREE from 'three'
 
 export interface UserAvatarOptions {
   scale?: number
-  color?: string // Default: #4A90E2 (professional blue)
+  color?: number // Default: 0x4A90E2 (professional blue)
   name?: string // Display above avatar
 }
 
@@ -10,11 +10,10 @@ export type AvatarState = 'observing' | 'gesturing' | 'celebrating' | 'concerned
 
 export class UserAvatar {
   mesh: THREE.Group
-  private body: THREE.Mesh
-  private head: THREE.Mesh
-  private leftArm: THREE.Mesh
-  private rightArm: THREE.Mesh
   private platform: THREE.Mesh
+  private holo: THREE.Group // Holographic figure
+  private coreOrb: THREE.Mesh // Central glowing orb
+  private rings: THREE.Mesh[] // Rotating rings
   private nameLabel: THREE.Sprite
   private state: AvatarState
   private animationTime: number = 0
@@ -22,24 +21,23 @@ export class UserAvatar {
   constructor(options: UserAvatarOptions = {}) {
     this.mesh = new THREE.Group()
     this.state = 'observing'
+    this.rings = []
 
     // Create elevated platform
     this.platform = this.createPlatform()
     this.mesh.add(this.platform)
 
-    // Create human-like character
-    const color = options.color || '#4A90E2'
-    this.body = this.createBody(color)
-    this.mesh.add(this.body)
+    // Create holographic figure
+    const color = options.color || 0x4a90e2
+    this.holo = this.createHolographicFigure(color)
+    this.mesh.add(this.holo)
 
-    this.head = this.createHead()
-    this.mesh.add(this.head)
+    // Create central orb
+    this.coreOrb = this.createCoreOrb(color)
+    this.mesh.add(this.coreOrb)
 
-    const arms = this.createArms(color)
-    this.leftArm = arms.left
-    this.rightArm = arms.right
-    this.mesh.add(this.leftArm)
-    this.mesh.add(this.rightArm)
+    // Create rotating rings
+    this.createRotatingRings(color)
 
     // Create name label
     this.nameLabel = this.createNameLabel(options.name || 'Operator')
@@ -58,11 +56,13 @@ export class UserAvatar {
   private createPlatform(): THREE.Mesh {
     const geometry = new THREE.CylinderGeometry(2.5, 2.5, 0.3, 6)
     const material = new THREE.MeshStandardMaterial({
-      color: '#4A90E2',
-      emissive: '#4A90E2',
-      emissiveIntensity: 0.3,
-      metalness: 0.5,
-      roughness: 0.5,
+      color: 0x4a90e2,
+      emissive: 0x4a90e2,
+      emissiveIntensity: 0.4,
+      metalness: 0.7,
+      roughness: 0.3,
+      transparent: true,
+      opacity: 0.8,
     })
     const platform = new THREE.Mesh(geometry, material)
     platform.position.y = -0.15
@@ -71,43 +71,76 @@ export class UserAvatar {
     return platform
   }
 
-  private createBody(color: string): THREE.Mesh {
-    // Humanoid torso (cylinder)
-    const geometry = new THREE.CylinderGeometry(0.3, 0.35, 1.2, 8)
-    const material = new THREE.MeshStandardMaterial({ color })
-    const body = new THREE.Mesh(geometry, material)
-    body.position.y = 0.6
-    body.castShadow = true
-    return body
+  private createHolographicFigure(color: number): THREE.Group {
+    const group = new THREE.Group()
+
+    // Wireframe humanoid silhouette
+    const material = new THREE.MeshBasicMaterial({
+      color,
+      wireframe: true,
+      transparent: true,
+      opacity: 0.6,
+    })
+
+    // Torso
+    const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.3, 1.0, 8, 1), material)
+    torso.position.y = 0.8
+    group.add(torso)
+
+    // Head
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 8), material)
+    head.position.y = 1.5
+    group.add(head)
+
+    // Shoulders
+    const shoulderBar = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.6, 4), material)
+    shoulderBar.rotation.z = Math.PI / 2
+    shoulderBar.position.y = 1.2
+    group.add(shoulderBar)
+
+    return group
   }
 
-  private createHead(): THREE.Mesh {
-    // Simple head (sphere)
-    const geometry = new THREE.SphereGeometry(0.25, 16, 16)
-    const material = new THREE.MeshStandardMaterial({ color: '#FFD9B3' })
-    const head = new THREE.Mesh(geometry, material)
-    head.position.y = 1.4
-    head.castShadow = true
-    return head
+  private createCoreOrb(color: number): THREE.Mesh {
+    const geometry = new THREE.SphereGeometry(0.15, 16, 16)
+    const material = new THREE.MeshStandardMaterial({
+      color,
+      emissive: color,
+      emissiveIntensity: 0.8,
+      transparent: true,
+      opacity: 0.7,
+      metalness: 0.9,
+      roughness: 0.1,
+    })
+    const orb = new THREE.Mesh(geometry, material)
+    orb.position.y = 1.5 // At head level
+    orb.castShadow = false
+    return orb
   }
 
-  private createArms(color: string): { left: THREE.Mesh; right: THREE.Mesh } {
-    const armGeometry = new THREE.CylinderGeometry(0.1, 0.1, 0.8, 6)
-    const armMaterial = new THREE.MeshStandardMaterial({ color })
+  private createRotatingRings(color: number): void {
+    // Create 3 orbital rings around the figure
+    const ringMaterial = new THREE.LineBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.4,
+    })
 
-    // Left arm
-    const leftArm = new THREE.Mesh(armGeometry, armMaterial)
-    leftArm.position.set(-0.45, 0.8, 0)
-    leftArm.rotation.z = Math.PI / 6
-    leftArm.castShadow = true
+    for (let i = 0; i < 3; i++) {
+      const radius = 0.8 + i * 0.2
+      const points: THREE.Vector3[] = []
+      const segments = 32
+      for (let j = 0; j <= segments; j++) {
+        const angle = (j / segments) * Math.PI * 2
+        points.push(new THREE.Vector3(Math.cos(angle) * radius, 0.8, Math.sin(angle) * radius))
+      }
 
-    // Right arm
-    const rightArm = new THREE.Mesh(armGeometry, armMaterial.clone())
-    rightArm.position.set(0.45, 0.8, 0)
-    rightArm.rotation.z = -Math.PI / 6
-    rightArm.castShadow = true
-
-    return { left: leftArm, right: rightArm }
+      const geometry = new THREE.BufferGeometry().setFromPoints(points)
+      const ring = new THREE.Line(geometry, ringMaterial)
+      ring.rotation.x = Math.PI / 2 + (i * Math.PI) / 12 // Slight tilt each
+      this.rings.push(ring as any)
+      this.mesh.add(ring)
+    }
   }
 
   private createNameLabel(name: string): THREE.Sprite {
@@ -145,23 +178,34 @@ export class UserAvatar {
         const elapsed = Date.now() - startTime
         const progress = Math.min(elapsed / duration, 1)
 
-        // Arms raise up
-        const angle = progress * Math.PI
-        this.leftArm.rotation.z = Math.PI / 6 + Math.sin(angle) * 0.8
-        this.rightArm.rotation.z = -Math.PI / 6 - Math.sin(angle) * 0.8
+        // Holo figure rises and spins
+        const rise = Math.sin(progress * Math.PI) * 0.5
+        this.holo.position.y = rise
+        this.holo.rotation.y = progress * Math.PI * 2
 
-        // Platform pulses bright
-        const pulse = 0.3 + Math.sin(progress * Math.PI * 4) * 0.2
+        // Core orb pulses bright
+        const pulse = 0.8 + Math.sin(progress * Math.PI * 6) * 0.3
+        const orbMaterial = this.coreOrb.material as THREE.MeshStandardMaterial
+        orbMaterial.emissiveIntensity = pulse
+
+        // Rings spin faster
+        this.rings.forEach((ring, i) => {
+          ring.rotation.z = progress * Math.PI * 2 * (i + 1)
+        })
+
+        // Platform pulses
+        const platformPulse = 0.4 + Math.sin(progress * Math.PI * 4) * 0.2
         const platformMaterial = this.platform.material as THREE.MeshStandardMaterial
-        platformMaterial.emissiveIntensity = pulse
+        platformMaterial.emissiveIntensity = platformPulse
 
         if (progress < 1) {
           requestAnimationFrame(animate)
         } else {
           // Reset
-          this.leftArm.rotation.z = Math.PI / 6
-          this.rightArm.rotation.z = -Math.PI / 6
-          platformMaterial.emissiveIntensity = 0.3
+          this.holo.position.y = 0
+          this.holo.rotation.y = 0
+          orbMaterial.emissiveIntensity = 0.8
+          platformMaterial.emissiveIntensity = 0.4
           this.state = 'observing'
           resolve()
         }
@@ -184,12 +228,12 @@ export class UserAvatar {
         const elapsed = Date.now() - startTime
         const progress = Math.min(elapsed / duration, 1)
 
-        // Point right arm toward target
-        this.rightArm.rotation.y = angle * progress
-        this.rightArm.rotation.z = -Math.PI / 6 - progress * 0.5
+        // Holo figure leans and points toward target
+        this.holo.rotation.y = angle * progress
 
-        // Turn head toward target
-        this.head.rotation.y = angle * progress * 0.5
+        // Orb brightens in direction
+        const orbMaterial = this.coreOrb.material as THREE.MeshStandardMaterial
+        orbMaterial.emissiveIntensity = 0.8 + progress * 0.4
 
         if (progress < 1) {
           requestAnimationFrame(animate)
@@ -203,9 +247,8 @@ export class UserAvatar {
               const progress = Math.min(elapsed / resetDuration, 1)
               const eased = 1 - Math.pow(1 - progress, 3)
 
-              this.rightArm.rotation.y = angle * (1 - eased)
-              this.rightArm.rotation.z = -Math.PI / 6 - 0.5 * (1 - eased)
-              this.head.rotation.y = angle * 0.5 * (1 - eased)
+              this.holo.rotation.y = angle * (1 - eased)
+              orbMaterial.emissiveIntensity = 1.2 - progress * 0.4
 
               if (progress < 1) {
                 requestAnimationFrame(resetAnimate)
@@ -232,14 +275,16 @@ export class UserAvatar {
         const elapsed = Date.now() - startTime
         const progress = Math.min(elapsed / duration, 1)
 
-        // Wave gesture - right arm
-        const wave = Math.sin(progress * Math.PI * 3)
-        this.rightArm.rotation.z = -Math.PI / 6 - wave * 0.4
+        // Rings pulse outward
+        const scale = 1 + Math.sin(progress * Math.PI * 3) * 0.3
+        this.rings.forEach((ring) => {
+          ring.scale.setScalar(scale)
+        })
 
         if (progress < 1) {
           requestAnimationFrame(animate)
         } else {
-          this.rightArm.rotation.z = -Math.PI / 6
+          this.rings.forEach((ring) => ring.scale.setScalar(1))
           this.state = 'observing'
           resolve()
         }
@@ -258,13 +303,19 @@ export class UserAvatar {
         const elapsed = Date.now() - startTime
         const progress = Math.min(elapsed / duration, 1)
 
-        // Head shake
-        this.head.rotation.y = Math.sin(progress * Math.PI * 4) * 0.3
+        // Holo figure shakes side to side
+        this.holo.position.x = Math.sin(progress * Math.PI * 4) * 0.2
+
+        // Orb flickers red
+        const orbMaterial = this.coreOrb.material as THREE.MeshStandardMaterial
+        const flicker = Math.random() > 0.5 ? 1 : 0
+        orbMaterial.color.setHex(flicker ? 0xff4444 : 0x4a90e2)
 
         if (progress < 1) {
           requestAnimationFrame(animate)
         } else {
-          this.head.rotation.y = 0
+          this.holo.position.x = 0
+          orbMaterial.color.setHex(0x4a90e2)
           this.state = 'observing'
           resolve()
         }
@@ -283,10 +334,10 @@ export class UserAvatar {
         const elapsed = Date.now() - startTime
         const progress = Math.min(elapsed / duration, 1)
 
-        // Hand to chin
-        this.rightArm.position.x = 0.45 + progress * -0.3
-        this.rightArm.position.y = 0.8 + progress * 0.4
-        this.rightArm.rotation.z = -Math.PI / 6 - progress * 0.8
+        // Orb rotates and dims slightly
+        this.coreOrb.rotation.y = progress * Math.PI * 2
+        const orbMaterial = this.coreOrb.material as THREE.MeshStandardMaterial
+        orbMaterial.emissiveIntensity = 0.8 - progress * 0.2
 
         if (progress < 1) {
           requestAnimationFrame(animate)
@@ -309,14 +360,25 @@ export class UserAvatar {
   update(deltaTime: number): void {
     this.animationTime += deltaTime
 
-    // Idle animation - subtle breathing motion
+    // Idle animation when observing
     if (this.state === 'observing') {
-      const breathe = Math.sin(this.animationTime * 1.5) * 0.02
-      this.body.scale.y = 1 + breathe
+      // Holo figure subtle float
+      const float = Math.sin(this.animationTime * 1.2) * 0.03
+      this.holo.position.y = float
+
+      // Core orb gentle pulse
+      const pulse = Math.sin(this.animationTime * 0.8) * 0.1
+      const orbMaterial = this.coreOrb.material as THREE.MeshStandardMaterial
+      orbMaterial.emissiveIntensity = 0.8 + pulse
+
+      // Rings slow rotation
+      this.rings.forEach((ring, i) => {
+        ring.rotation.z += deltaTime * (0.2 + i * 0.1)
+      })
 
       // Gentle platform glow pulse
       const platformMaterial = this.platform.material as THREE.MeshStandardMaterial
-      platformMaterial.emissiveIntensity = 0.3 + Math.sin(this.animationTime * 0.5) * 0.05
+      platformMaterial.emissiveIntensity = 0.4 + Math.sin(this.animationTime * 0.5) * 0.05
     }
   }
 

@@ -171,7 +171,7 @@ function createCharacter(scene: WorkshopScene, options: CharacterOptions): IChar
       return new Wizard(scene, options)
   }
 
-  // Robot variants with theme colors
+  // Robot variants with theme colors (Claude class from ClaudeMon.ts - the modular robot)
   const theme =
     CHARACTER_THEMES[characterType as keyof typeof CHARACTER_THEMES] || CHARACTER_THEMES.robot
   const themedOptions = {

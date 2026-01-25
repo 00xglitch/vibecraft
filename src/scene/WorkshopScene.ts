@@ -321,9 +321,10 @@ export class WorkshopScene {
     // Initialize station panels
     this.stationPanels = new StationPanels(this.scene)
 
-    // Create user avatar at central platform
+    // Create user avatar at central platform (holographic operator)
     this.userAvatar = new UserAvatar({
       scale: 1.3,
+      color: 0x4a90e2, // Professional blue
       name: 'Operator',
     })
     this.scene.add(this.userAvatar.mesh)
