@@ -13,6 +13,7 @@ import { registerFeedHandlers } from './feedHandlers'
 import { registerAnimationHandlers } from './animationHandlers'
 import { registerCommitHandlers } from './commitHandlers'
 import { registerActivityHandlers } from './activityHandlers'
+import { registerUserAvatarHandlers } from './userAvatarHandlers'
 
 /**
  * Register all EventBus handlers
@@ -28,6 +29,7 @@ export function registerAllHandlers(): void {
   registerAnimationHandlers()
   registerCommitHandlers()
   registerActivityHandlers()
+  registerUserAvatarHandlers()
 }
 
 // Re-export individual registrations for testing
@@ -41,6 +43,7 @@ export {
   registerAnimationHandlers,
   registerCommitHandlers,
   registerActivityHandlers,
+  registerUserAvatarHandlers,
 }
 
 // Re-export commit handler configuration for main.ts

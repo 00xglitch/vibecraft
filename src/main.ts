@@ -2370,6 +2370,7 @@ function handleEvent(event: ClaudeEvent, isHistory = false) {
     timelineManager: state.timelineManager,
     soundEnabled: state.soundEnabled,
     isHistory,
+    userAvatar: state.scene?.userAvatar || null,
     session: session
       ? {
           id: event.sessionId,

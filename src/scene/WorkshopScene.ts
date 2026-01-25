@@ -28,6 +28,7 @@ import {
 } from './stations'
 import type { MCPToolCategory } from '../mcp'
 import { zoneLOD, memoryBudget, type LODLevel, type LODFeatures } from '../systems'
+import { UserAvatar } from '../entities/UserAvatar'
 
 export interface Station {
   type: StationType
@@ -212,6 +213,9 @@ export class WorkshopScene {
   // Station info panels
   public stationPanels: StationPanels
 
+  // User avatar (operator in 3D space)
+  public userAvatar: UserAvatar | null = null
+
   // Ambient floating particles
   private ambientParticles: THREE.Points | null = null
   private ambientParticleData: Array<{
@@ -316,6 +320,13 @@ export class WorkshopScene {
 
     // Initialize station panels
     this.stationPanels = new StationPanels(this.scene)
+
+    // Create user avatar at central platform
+    this.userAvatar = new UserAvatar({
+      scale: 1.3,
+      name: 'Operator',
+    })
+    this.scene.add(this.userAvatar.mesh)
 
     // Initialize LOD and memory management
     this.initializeLODSystem()
@@ -3227,6 +3238,11 @@ export class WorkshopScene {
 
       // Update station panels
       this.stationPanels.update()
+
+      // Update user avatar
+      if (this.userAvatar) {
+        this.userAvatar.update(delta)
+      }
 
       // Render
       this.renderer.render(this.scene, this.camera)

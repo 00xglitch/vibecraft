@@ -26,6 +26,7 @@ import type {
 import type { WorkshopScene } from '../scene/WorkshopScene'
 import type { FeedManager } from '../ui/FeedManager'
 import type { TimelineManager } from '../ui/TimelineManager'
+import type { UserAvatar } from '../entities/UserAvatar'
 
 // ============================================================================
 // Types
@@ -45,6 +46,8 @@ export interface EventContext {
   soundEnabled: boolean
   /** Whether this event is from history replay (vs real-time) */
   isHistory: boolean
+  /** User avatar (operator) */
+  userAvatar: UserAvatar | null
 }
 
 /**
@@ -73,12 +76,12 @@ export interface SessionContext {
 
 /** Event type to event data mapping */
 export interface EventTypeMap {
-  'pre_tool_use': PreToolUseEvent
-  'post_tool_use': PostToolUseEvent
-  'stop': StopEvent
-  'user_prompt_submit': UserPromptSubmitEvent
-  'session_start': ClaudeEvent
-  'notification': ClaudeEvent
+  pre_tool_use: PreToolUseEvent
+  post_tool_use: PostToolUseEvent
+  stop: StopEvent
+  user_prompt_submit: UserPromptSubmitEvent
+  session_start: ClaudeEvent
+  notification: ClaudeEvent
 }
 
 export type EventType = keyof EventTypeMap
