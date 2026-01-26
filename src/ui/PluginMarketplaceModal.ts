@@ -12,6 +12,11 @@
 import { toast } from './Toast'
 import type { ManagedSession } from '../../shared/types'
 
+// API URL (proxied in dev, direct in prod)
+const API_URL = import.meta.env.DEV
+  ? '/api'
+  : `http://localhost:${(window as any).VIBECRAFT_PORT || 4003}`
+
 let modal: HTMLElement | null = null
 let activeTab: 'marketplace' | 'installed' = 'marketplace'
 let plugins: Plugin[] = []
@@ -187,7 +192,7 @@ function switchTab(tab: 'marketplace' | 'installed'): void {
 
 async function fetchPlugins(): Promise<void> {
   try {
-    const res = await fetch('/api/plugins')
+    const res = await fetch(`${API_URL}/plugins`)
     const data = await res.json()
     plugins = data.plugins || []
   } catch (err) {
@@ -198,7 +203,7 @@ async function fetchPlugins(): Promise<void> {
 
 async function fetchInstalled(): Promise<void> {
   try {
-    const res = await fetch('/api/plugins/installed')
+    const res = await fetch(`${API_URL}/plugins/installed`)
     const data = await res.json()
     installedPlugins = data.plugins || []
 
@@ -214,7 +219,7 @@ async function fetchInstalled(): Promise<void> {
 
 async function fetchCategories(): Promise<void> {
   try {
-    const res = await fetch('/api/plugins/categories')
+    const res = await fetch(`${API_URL}/plugins/categories`)
     const data = await res.json()
     categories = data.categories.map((c: { name: string }) => c.name)
   } catch (err) {
@@ -572,7 +577,7 @@ async function installPlugin(pluginId: string): Promise<void> {
   try {
     toast.info(`Installing ${plugin.name}...`, { duration: 5000 })
 
-    const res = await fetch('/api/plugins/install', {
+    const res = await fetch(`${API_URL}/plugins/install`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pluginId }),
@@ -610,7 +615,7 @@ async function uninstallPlugin(pluginId: string): Promise<void> {
   try {
     toast.info(`Uninstalling ${plugin.name}...`)
 
-    const res = await fetch('/api/plugins/uninstall', {
+    const res = await fetch(`${API_URL}/plugins/uninstall`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pluginId }),
@@ -636,7 +641,7 @@ async function togglePlugin(pluginId: string, enabled: boolean): Promise<void> {
   if (!plugin) return
 
   try {
-    const res = await fetch('/api/plugins/toggle', {
+    const res = await fetch(`${API_URL}/plugins/toggle`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pluginId, enabled }),

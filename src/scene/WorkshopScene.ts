@@ -93,6 +93,14 @@ export interface Zone {
   themeId?: ZoneThemeId
   /** Activity pulse for high-activity zones */
   activityPulse?: boolean
+  /** Multi-agent support - agents working in this zone */
+  agents: Map<string, import('../../shared/types').ZoneAgent> // sessionId -> agent
+  /** Team ID if this zone is part of a multi-agent team */
+  teamId?: string
+  /** Whether this is the primary zone (coordinator's zone) or secondary */
+  teamRole?: 'primary' | 'secondary'
+  /** Visual indicator of shared memory (team context) */
+  sharedContext?: THREE.Mesh
 }
 
 export type CameraMode = 'focused' | 'overview' | 'follow-active'
@@ -766,6 +774,8 @@ export class WorkshopScene {
       sideMesh,
       // Dynamic MCP stations
       mcpStations: new Map(),
+      // Multi-agent support
+      agents: new Map(),
     }
 
     // Start with scale 0 for enter animation
@@ -839,6 +849,75 @@ export class WorkshopScene {
     const zone = this.zones.get(sessionId)
     if (!zone) return null
     return this.hexGrid.cartesianToHex(zone.position.x, zone.position.z)
+  }
+
+  /**
+   * Find a zone by its session ID
+   */
+  findZoneBySessionId(sessionId: string): any | null {
+    return this.zones.get(sessionId) || null
+  }
+
+  /**
+   * Show pulsing connection line between two zones (visual feedback for agent messages)
+   */
+  showMessageLine(fromSessionId: string, toSessionId: string, duration: number = 1000): void {
+    const fromZone = this.zones.get(fromSessionId)
+    const toZone = this.zones.get(toSessionId)
+
+    if (!fromZone || !toZone) return
+
+    // Create line geometry from zone center to zone center
+    const fromPos = fromZone.position
+    const toPos = toZone.position
+
+    const points = [
+      new THREE.Vector3(fromPos.x, 0.5, fromPos.z),
+      new THREE.Vector3(toPos.x, 0.5, toPos.z),
+    ]
+
+    const geometry = new THREE.BufferGeometry().setFromPoints(points)
+    const material = new THREE.LineBasicMaterial({
+      color: 0x00ffff,
+      linewidth: 2,
+      transparent: true,
+      opacity: 1,
+    })
+
+    const line = new THREE.Line(geometry, material)
+    this.scene.add(line)
+
+    // Animate pulse effect
+    const startTime = Date.now()
+    const animate = () => {
+      const elapsed = Date.now() - startTime
+      const progress = elapsed / duration
+
+      if (progress >= 1) {
+        // Animation complete - remove line
+        this.scene.remove(line)
+        geometry.dispose()
+        material.dispose()
+        return
+      }
+
+      // Pulse effect: fade in, pulse brightness, fade out
+      if (progress < 0.2) {
+        // Fade in
+        material.opacity = progress / 0.2
+      } else if (progress > 0.8) {
+        // Fade out
+        material.opacity = (1 - progress) / 0.2
+      } else {
+        // Middle: pulse between 0.6 and 1.0
+        const pulse = 0.6 + 0.4 * Math.sin(progress * Math.PI * 4)
+        material.opacity = pulse
+      }
+
+      requestAnimationFrame(animate)
+    }
+
+    animate()
   }
 
   /**
@@ -1091,6 +1170,125 @@ export class WorkshopScene {
    */
   getGridSpreadFactor(): number {
     return this.hexGrid.getSpreadFactor()
+  }
+
+  // ============================================================================
+  // Multi-Agent Zone Management
+  // ============================================================================
+
+  /**
+   * Add an agent to a zone (up to 6 agents per zone)
+   * Positions agents in ring formation around zone center
+   */
+  addAgentToZone(zoneId: string, agent: import('../../shared/types').ZoneAgent): boolean {
+    const zone = this.zones.get(zoneId)
+    if (!zone) {
+      console.warn(`Cannot add agent: zone ${zoneId} not found`)
+      return false
+    }
+
+    if (zone.agents.size >= 6) {
+      console.warn(`Zone ${zoneId} is full - max 6 agents per zone`)
+      return false
+    }
+
+    zone.agents.set(agent.sessionId, agent)
+
+    // Reposition all agents in ring formation
+    this.repositionAgents(zone)
+
+    // Add character mesh to scene
+    this.scene.add(agent.character.mesh)
+
+    console.log(
+      `Added agent ${agent.sessionId.slice(0, 8)} (${agent.role}) to zone ${zoneId.slice(0, 8)}`
+    )
+    return true
+  }
+
+  /**
+   * Remove an agent from a zone
+   */
+  removeAgentFromZone(zoneId: string, agentSessionId: string): boolean {
+    const zone = this.zones.get(zoneId)
+    if (!zone) return false
+
+    const agent = zone.agents.get(agentSessionId)
+    if (!agent) return false
+
+    // Remove character mesh from scene
+    this.scene.remove(agent.character.mesh)
+
+    // Remove from zone
+    zone.agents.delete(agentSessionId)
+
+    // Reposition remaining agents
+    this.repositionAgents(zone)
+
+    console.log(`Removed agent ${agentSessionId.slice(0, 8)} from zone ${zoneId.slice(0, 8)}`)
+    return true
+  }
+
+  /**
+   * Position agents in ring formation around zone center
+   * Coordinator (if any) stays at center, others arranged in ring
+   */
+  private repositionAgents(zone: Zone): void {
+    const agents = Array.from(zone.agents.values())
+    const count = agents.length
+
+    if (count === 0) return
+
+    if (count === 1) {
+      // Single agent at zone center
+      const agent = agents[0]
+      agent.character.mesh.position.copy(zone.position)
+      agent.position = { x: zone.position.x, y: 0, z: zone.position.z }
+      return
+    }
+
+    // Multiple agents - ring formation
+    const radius = 3.5 // Distance from zone center for ring
+    const nonCoordinators: typeof agents = []
+    let coordinator: (typeof agents)[0] | null = null
+
+    // Separate coordinator from others
+    for (const agent of agents) {
+      if (agent.role === 'coordinator') {
+        coordinator = agent
+      } else {
+        nonCoordinators.push(agent)
+      }
+    }
+
+    // Position coordinator at center if present
+    if (coordinator) {
+      coordinator.character.mesh.position.copy(zone.position)
+      coordinator.position = { x: zone.position.x, y: 0, z: zone.position.z }
+    }
+
+    // Position others in ring
+    const agentsToArrange = coordinator ? nonCoordinators : agents
+    agentsToArrange.forEach((agent, i) => {
+      const angle = (i / agentsToArrange.length) * Math.PI * 2
+      const x = zone.position.x + Math.cos(angle) * radius
+      const z = zone.position.z + Math.sin(angle) * radius
+
+      agent.character.mesh.position.set(x, 0, z)
+      agent.position = { x, y: 0, z }
+
+      // Face toward center
+      agent.character.mesh.rotation.y = angle + Math.PI
+    })
+  }
+
+  /**
+   * Find zone by session name (for @mention targeting)
+   */
+  findZoneBySessionName(sessionName: string): Zone | null {
+    // This will be implemented when we integrate with managed sessions
+    // For now, just return null
+    return null
   }
 
   /**

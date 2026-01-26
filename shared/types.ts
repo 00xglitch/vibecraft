@@ -199,6 +199,9 @@ export type ServerMessage =
       type: 'orchestrator_task_update'
       payload: import('./orchestrator-types.js').OrchestratorTask
     }
+  | { type: 'team_created'; payload: Team }
+  | { type: 'team_updated'; payload: Team }
+  | { type: 'agent_message'; payload: AgentMessage }
 
 /** Client -> Server messages */
 export type ClientMessage =
@@ -387,6 +390,17 @@ export interface ManagedSession {
   enabledPlugins?: string[]
   /** Enabled MCP server IDs for this session */
   enabledMCPs?: string[]
+  /** Multi-Agent Team Support */
+  /** Team ID if this session is part of a multi-agent team */
+  teamId?: string
+  /** This session's role in the team (coordinator, researcher, coder, etc.) */
+  agentRole?: AgentRole
+  /** Whether this session is the team coordinator (leader) */
+  isCoordinator?: boolean
+  /** Session IDs of other team members */
+  teamMembers?: string[]
+  /** Shared memory ID for team context */
+  sharedMemoryId?: string
   /** Runtime environment where session is running */
   environment?: {
     type: EnvironmentType // 'docker' | 'wsl' | 'native'
@@ -397,6 +411,94 @@ export interface ManagedSession {
   containerId?: string
   /** Runtime type: 'tmux' (local) or 'docker' (container) */
   runtime?: SessionRuntime
+}
+
+// ============================================================================
+// Multi-Agent Team Types
+// ============================================================================
+
+/** Role an agent plays in a multi-agent team */
+export type AgentRole =
+  | 'coordinator' // Team leader, delegates tasks
+  | 'researcher' // Information gathering
+  | 'coder' // Code implementation
+  | 'reviewer' // Code review and quality
+  | 'tester' // Test creation and execution
+  | 'documenter' // Documentation writing
+  | 'architect' // System design
+  | 'custom' // User-defined role
+
+/** Multi-agent team */
+export interface Team {
+  /** Unique team ID */
+  id: string
+  /** User-friendly team name */
+  name: string
+  /** Team's goal/purpose */
+  goal: string
+  /** Session IDs of all team members */
+  sessions: string[]
+  /** Session ID of the coordinator (team leader) */
+  coordinatorId: string
+  /** Shared memory ID for team context */
+  sharedMemoryId: string
+  /** Creation timestamp */
+  createdAt: number
+  /** Team status */
+  status: 'active' | 'paused' | 'completed'
+}
+
+/** Message between agents */
+export interface AgentMessage {
+  /** Unique message ID */
+  id: string
+  /** From session ID */
+  from: string
+  /** To session ID, 'all', or 'team' */
+  to: string | 'all' | 'team'
+  /** Team ID if team-scoped message */
+  teamId?: string
+  /** Message timestamp */
+  timestamp: number
+  /** Message type */
+  type: 'task' | 'question' | 'response' | 'status' | 'result'
+  /** Message content */
+  content: string
+  /** Optional metadata */
+  metadata?: {
+    priority?: 'low' | 'medium' | 'high'
+    requiresResponse?: boolean
+    relatedToolUseId?: string
+  }
+}
+
+/** Shared memory for team context */
+export interface SharedMemory {
+  /** Unique memory ID */
+  id: string
+  /** Team ID this memory belongs to */
+  teamId: string
+  /** Memory entries (chronological) */
+  entries: Array<{
+    timestamp: number
+    sessionId: string
+    type: 'context' | 'decision' | 'finding' | 'task'
+    content: string
+  }>
+}
+
+/** Agent within a zone */
+export interface ZoneAgent {
+  /** Session ID */
+  sessionId: string
+  /** Character instance (ICharacter) */
+  character: any // Avoid circular dependency
+  /** Agent's role */
+  role: AgentRole
+  /** Position within zone (ring formation) */
+  position: { x: number; y: number; z: number }
+  /** Agent's color */
+  color: number
 }
 
 /** Git repository status */

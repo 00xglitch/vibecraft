@@ -182,3 +182,107 @@ textarea:focus-visible {
     scroll-behavior: smooth;
   }
 }
+
+/* ============================================
+   Mobile Responsive Styles
+   ============================================ */
+
+/* Right panel mobile collapsible */
+@media (max-width: 768px) {
+  #feed-panel {
+    position: fixed;
+    right: -100%;
+    top: 0;
+    bottom: 0;
+    width: 90%;
+    max-width: 400px;
+    background: rgba(10, 10, 15, 0.98);
+    backdrop-filter: blur(10px);
+    transition: right 0.3s ease;
+    z-index: 900;
+    box-shadow: -4px 0 20px rgba(0, 0, 0, 0.5);
+  }
+
+  #feed-panel.mobile-visible {
+    right: 0;
+  }
+
+  /* Mobile toggle button */
+  .mobile-panel-toggle {
+    position: fixed;
+    right: 16px;
+    top: 16px;
+    z-index: 950;
+    background: rgba(74, 200, 232, 0.9);
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 48px;
+    height: 48px;
+    font-size: 20px;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    transition: all 0.2s;
+  }
+
+  .mobile-panel-toggle:hover {
+    background: rgba(74, 200, 232, 1);
+    transform: scale(1.1);
+  }
+
+  .mobile-panel-toggle.panel-open {
+    background: rgba(239, 68, 68, 0.9);
+  }
+
+  .mobile-panel-toggle.panel-open:hover {
+    background: rgba(239, 68, 68, 1);
+  }
+
+  /* Overlay when panel is open */
+  .mobile-panel-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    z-index: 850;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s;
+  }
+
+  .mobile-panel-overlay.visible {
+    opacity: 1;
+    visibility: visible;
+  }
+
+  /* Adjust modal z-index to appear above panel */
+  .modal-backdrop {
+    z-index: 1000;
+  }
+}
+
+/* Smaller phones */
+@media (max-width: 480px) {
+  #feed-panel {
+    width: 100%;
+    max-width: none;
+  }
+
+  .modal-content {
+    width: 95vw;
+    max-height: 90vh;
+    padding: 16px;
+  }
+
+  #new-session-modal .modal-content {
+    width: 95vw;
+  }
+}
+
+/* Hide mobile toggle on desktop */
+@media (min-width: 769px) {
+  .mobile-panel-toggle,
+  .mobile-panel-overlay {
+    display: none;
+  }
+}

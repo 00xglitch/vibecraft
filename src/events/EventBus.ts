@@ -22,6 +22,7 @@ import type {
   PostToolUseEvent,
   StopEvent,
   UserPromptSubmitEvent,
+  AgentMessage,
 } from '../../shared/types'
 import type { WorkshopScene } from '../scene/WorkshopScene'
 import type { FeedManager } from '../ui/FeedManager'
@@ -82,6 +83,7 @@ export interface EventTypeMap {
   user_prompt_submit: UserPromptSubmitEvent
   session_start: ClaudeEvent
   notification: ClaudeEvent
+  agent_message: AgentMessage
 }
 
 export type EventType = keyof EventTypeMap

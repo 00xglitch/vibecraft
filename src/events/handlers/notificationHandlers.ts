@@ -13,7 +13,7 @@ import {
   formatSearchResult,
 } from '../../scene/ZoneNotifications'
 import { showToast, type ToastType } from '../../ui/Toast'
-import type { PostToolUseEvent, NotificationEvent } from '../../../shared/types'
+import type { PostToolUseEvent, NotificationEvent, AgentMessage } from '../../../shared/types'
 import { getStationForTool } from '../../../shared/types'
 
 /**
@@ -183,6 +183,57 @@ export function registerNotificationHandlers(): void {
         icon: style.icon,
         style: style.type === 'warning' ? 'warning' : style.type === 'error' ? 'error' : 'info',
         duration: 4,
+      })
+    }
+  })
+
+  // Agent-to-Agent messaging (visual feedback)
+  eventBus.on('agent_message', (event: AgentMessage, ctx) => {
+    // Skip during history replay
+    if (ctx.isHistory || !ctx.scene) return
+
+    // Show connection line pulse between zones (if both zones exist)
+    if (event.to !== 'all' && event.to !== 'team') {
+      // Direct message - show connection line
+      const fromZone = ctx.scene.findZoneBySessionId(event.from)
+      const toZone = ctx.scene.findZoneBySessionId(event.to)
+
+      if (fromZone && toZone) {
+        ctx.scene.showMessageLine(event.from, event.to, 1000)
+      }
+    }
+
+    // Get type-specific icon
+    const typeIcon =
+      {
+        task: '📋',
+        question: '❓',
+        response: '💬',
+        status: 'ℹ️',
+        result: '✅',
+      }[event.type] || '📨'
+
+    // Add to activity feed (if feedManager available)
+    if (ctx.feedManager) {
+      const targetLabel =
+        event.to === 'all' ? 'everyone' : event.to === 'team' ? 'team' : `@${event.to.slice(0, 8)}`
+
+      ctx.feedManager.add({
+        type: 'agent_message',
+        from: event.from.slice(0, 8),
+        to: targetLabel,
+        messageType: event.type,
+        content: event.content.slice(0, 100),
+        icon: typeIcon,
+        priority: event.metadata?.priority,
+      } as any) // Type assertion needed as feedManager doesn't know about agent_message yet
+    }
+
+    // Show toast for high-priority messages
+    if (event.metadata?.priority === 'high') {
+      showToast(`${typeIcon} High-priority message from ${event.from.slice(0, 8)}`, {
+        type: 'warning',
+        duration: 4000,
       })
     }
   })

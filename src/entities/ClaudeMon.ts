@@ -517,7 +517,7 @@ export class Claude implements ICharacter {
   private createStatusRing(): THREE.Mesh {
     const geometry = new THREE.RingGeometry(0.28, 0.32, 32)
     const material = new THREE.MeshBasicMaterial({
-      color: this.options.statusColor,
+      color: this.options.statusColor !== undefined ? this.options.statusColor : this.options.color,
       transparent: true,
       opacity: 0.5,
       side: THREE.DoubleSide,

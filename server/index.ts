@@ -48,6 +48,7 @@ import type {
   TextTile,
   CreateTextTileRequest,
   UpdateTextTileRequest,
+  AgentMessage,
   CreateWorkspaceRequest,
   UpdateWorkspaceRequest,
   CreateProjectRequest,
@@ -80,6 +81,8 @@ import { ChangeTracker } from './ChangeTracker.js'
 import { julesService } from './JulesService.js'
 import { mcpMarketplace } from './MCPMarketplace.js'
 import * as pluginMarketplace from './PluginMarketplace.js'
+import { TeamManager } from './TeamManager.js'
+import { MessageQueue } from './MessageQueue.js'
 import {
   detectEnvironment,
   getEnvironment,
@@ -593,6 +596,81 @@ const dockerSessionManager = new DockerSessionManager()
 
 /** Session settings manager for per-session MCP/plugin configuration */
 const sessionSettingsManager = new SessionSettingsManager()
+
+/** Team manager for multi-agent coordination */
+const teamManager = new TeamManager()
+
+// ==========================================================================
+// Agent-to-Agent Messaging
+// ==========================================================================
+
+/** Persistent message queue for agent-to-agent communication */
+const messageQueue = new MessageQueue()
+
+/** Route agent message to target(s) */
+function routeAgentMessage(message: AgentMessage): void {
+  if (message.to === 'all') {
+    // Broadcast to all sessions
+    managedSessions.forEach((session) => {
+      if (session.id !== message.from) {
+        queueMessage(session.id, message)
+      }
+    })
+  } else if (message.to === 'team') {
+    // Team-scoped message
+    const team = teamManager.getTeam(message.teamId!)
+    if (team) {
+      team.sessions.forEach((sessionId) => {
+        if (sessionId !== message.from) {
+          queueMessage(sessionId, message)
+        }
+      })
+    }
+  } else {
+    // Direct message
+    queueMessage(message.to, message)
+  }
+
+  // Broadcast to clients for visual feedback
+  broadcast({
+    type: 'agent_message',
+    payload: message,
+  } as ServerMessage)
+
+  log(`Message routed from ${message.from.slice(0, 8)} to ${message.to}`)
+}
+
+/** Queue message for delivery when target session is idle */
+function queueMessage(targetSessionId: string, message: AgentMessage): void {
+  messageQueue.enqueue(targetSessionId, message)
+}
+
+/** Deliver queued messages to a session (when it becomes idle) */
+function deliverQueuedMessages(sessionId: string): void {
+  const session = managedSessions.get(sessionId)
+  if (!session || session.status !== 'idle' || !session.tmuxSession) return
+
+  // Dequeue all messages
+  const messages = messageQueue.dequeue(sessionId)
+  if (messages.length === 0) return
+
+  // Deliver each message
+  for (const message of messages) {
+    const formattedMessage = `\n[Message from ${message.from}]\nType: ${message.type}\n${message.content}\n`
+    sendPromptToTmux(session.tmuxSession, formattedMessage)
+      .then(() => {
+        log(`Delivered message to ${sessionId.slice(0, 8)}`)
+      })
+      .catch((err: Error) => {
+        log(`Failed to deliver message to ${sessionId.slice(0, 8)}: ${err.message}`)
+      })
+  }
+}
+
+/** Helper to send text to tmux session (wraps sendToTmuxSafe) */
+async function sendPromptToTmux(tmuxSession: string, text: string): Promise<void> {
+  return sendToTmuxSafe(tmuxSession, text)
+}
 
 /** File change tracker for rollback functionality */
 const changeTracker = new ChangeTracker({
@@ -2752,6 +2830,8 @@ function addEvent(event: ClaudeEvent) {
           // Reset DSL state
           managedSession.doubleShotActive = false
           managedSession.doubleShotContinues = 0
+          // Deliver any queued agent messages
+          deliverQueuedMessages(managedSession.id)
         }
         break
       }
@@ -2762,6 +2842,8 @@ function addEvent(event: ClaudeEvent) {
         // Reset DSL state
         managedSession.doubleShotActive = false
         managedSession.doubleShotContinues = 0
+        // Deliver any queued agent messages
+        deliverQueuedMessages(managedSession.id)
         break
     }
 
@@ -4095,6 +4177,218 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
   }
 
   // ==========================================================================
+  // Team Management API (Multi-Agent Orchestration)
+  // ==========================================================================
+
+  // POST /api/teams - Create a new team
+  if (req.method === 'POST' && req.url === '/api/teams') {
+    collectRequestBody(req).then(async (body) => {
+      try {
+        const { coordinatorId, goal, name, members } = JSON.parse(body)
+
+        if (!coordinatorId || !goal) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: 'coordinatorId and goal are required' }))
+          return
+        }
+
+        const coordinator = managedSessions.get(coordinatorId)
+        if (!coordinator) {
+          res.writeHead(404, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: 'Coordinator session not found' }))
+          return
+        }
+
+        // Create team with coordinator
+        const team = teamManager.createTeam(coordinator, goal, name)
+
+        // Add additional members if provided
+        if (members && Array.isArray(members)) {
+          for (const { sessionId, role } of members) {
+            const session = managedSessions.get(sessionId)
+            if (session) {
+              teamManager.addAgentToTeam(team.id, session, role)
+            }
+          }
+        }
+
+        // Broadcast team creation to all clients
+        broadcast({
+          type: 'team_created',
+          payload: team,
+        } as ServerMessage)
+
+        // Broadcast updated sessions (team assignments)
+        broadcastSessions()
+
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, team }))
+        log(`Created team ${team.id} (${team.name}) with coordinator ${coordinatorId.slice(0, 8)}`)
+      } catch (error: unknown) {
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: error instanceof Error ? error.message : 'Failed to create team',
+          })
+        )
+      }
+    })
+    return
+  }
+
+  // GET /api/teams - Get all teams
+  if (req.method === 'GET' && req.url === '/api/teams') {
+    const teams = teamManager.getTeams()
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ ok: true, teams }))
+    return
+  }
+
+  // GET /api/teams/:id - Get a specific team
+  const teamMatch = req.url?.match(/^\/api\/teams\/([^/]+)$/)
+  if (req.method === 'GET' && teamMatch) {
+    const teamId = teamMatch[1]
+    const team = teamManager.getTeam(teamId)
+    if (team) {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: true, team }))
+    } else {
+      res.writeHead(404, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: false, error: 'Team not found' }))
+    }
+    return
+  }
+
+  // POST /api/teams/:id/members - Add member to team
+  const addMemberMatch = req.url?.match(/^\/api\/teams\/([^/]+)\/members$/)
+  if (req.method === 'POST' && addMemberMatch) {
+    const teamId = addMemberMatch[1]
+    collectRequestBody(req).then(async (body) => {
+      try {
+        const { sessionId, role } = JSON.parse(body)
+
+        if (!sessionId || !role) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: 'sessionId and role are required' }))
+          return
+        }
+
+        const session = managedSessions.get(sessionId)
+        if (!session) {
+          res.writeHead(404, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: 'Session not found' }))
+          return
+        }
+
+        const success = teamManager.addAgentToTeam(teamId, session, role)
+        if (success) {
+          // Broadcast team update
+          const team = teamManager.getTeam(teamId)
+          broadcast({
+            type: 'team_updated',
+            payload: team,
+          } as ServerMessage)
+
+          // Broadcast updated sessions
+          broadcastSessions()
+
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: true }))
+          log(`Added agent ${sessionId.slice(0, 8)} (${role}) to team ${teamId}`)
+        } else {
+          res.writeHead(404, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: 'Team not found or failed to add member' }))
+        }
+      } catch (error: unknown) {
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: error instanceof Error ? error.message : 'Failed to add team member',
+          })
+        )
+      }
+    })
+    return
+  }
+
+  // DELETE /api/teams/:teamId/members/:sessionId - Remove member from team
+  const removeMemberMatch = req.url?.match(/^\/api\/teams\/([^/]+)\/members\/([^/]+)$/)
+  if (req.method === 'DELETE' && removeMemberMatch) {
+    const [, teamId, sessionId] = removeMemberMatch
+    teamManager.removeAgentFromTeam(sessionId)
+
+    // Broadcast team update
+    const team = teamManager.getTeam(teamId)
+    if (team) {
+      broadcast({
+        type: 'team_updated',
+        payload: team,
+      } as ServerMessage)
+    }
+
+    // Broadcast updated sessions
+    broadcastSessions()
+
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ ok: true }))
+    log(`Removed agent ${sessionId.slice(0, 8)} from team ${teamId}`)
+    return
+  }
+
+  // ==========================================================================
+  // Agent-to-Agent Messaging API
+  // ==========================================================================
+
+  // POST /api/messages - Send agent message
+  if (req.url === '/api/messages' && req.method === 'POST') {
+    collectRequestBody(req).then((body) => {
+      try {
+        const message: AgentMessage = JSON.parse(body)
+        message.id = `msg-${Date.now()}`
+        message.timestamp = Date.now()
+
+        // Validate required fields
+        if (!message.from || !message.to || !message.content) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Missing required fields: from, to, content' }))
+          return
+        }
+
+        routeAgentMessage(message)
+
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: true, messageId: message.id }))
+      } catch (err: any) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: err.message }))
+      }
+    })
+    return
+  }
+
+  // GET /api/messages/stats - Get message queue statistics
+  // IMPORTANT: Must come BEFORE /api/messages/:sessionId to avoid regex match
+  if (req.method === 'GET' && req.url === '/api/messages/stats') {
+    const stats = messageQueue.getStats()
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ ok: true, ...stats }))
+    return
+  }
+
+  // GET /api/messages/:sessionId - Get queued messages for a session
+  const getMessagesMatch = req.url?.match(/^\/api\/messages\/([^/]+)$/)
+  if (getMessagesMatch && req.method === 'GET') {
+    const sessionId = getMessagesMatch[1]
+    const messages = messageQueue.peek(sessionId)
+
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ sessionId, messages, length: messages.length }))
+    return
+  }
+
+  // ==========================================================================
   // Google Jules API
   // ==========================================================================
 
@@ -5288,6 +5582,11 @@ async function main() {
       }
     })
 
+    // Load persistent message queue
+    messageQueue.load().catch((err) => {
+      log(`Warning: Failed to load message queue: ${err.message}`)
+    })
+
     // Start working timeout checking (every 10 seconds)
     setInterval(checkWorkingTimeout, WORKING_CHECK_INTERVAL_MS)
 
@@ -5308,6 +5607,14 @@ main()
 process.on('SIGINT', async () => {
   log('Shutting down...')
 
+  // Flush message queue to disk
+  try {
+    await messageQueue.flush()
+    log('Message queue saved')
+  } catch (err: any) {
+    log(`Warning: Failed to save message queue: ${err.message}`)
+  }
+
   // Stop all Docker sessions
   for (const session of managedSessions.values()) {
     if (session.runtime === 'docker') {
@@ -5325,6 +5632,14 @@ process.on('SIGINT', async () => {
 
 process.on('SIGTERM', async () => {
   log('Received SIGTERM, shutting down gracefully...')
+
+  // Flush message queue to disk
+  try {
+    await messageQueue.flush()
+    log('Message queue saved')
+  } catch (err: any) {
+    log(`Warning: Failed to save message queue: ${err.message}`)
+  }
 
   // Stop all Docker sessions
   for (const session of managedSessions.values()) {

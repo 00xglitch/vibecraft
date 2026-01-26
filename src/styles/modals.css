@@ -93,9 +93,24 @@
   padding: 24px;
   width: 420px;
   max-width: 90vw;
+  max-height: 85vh;
+  overflow-y: auto;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
   transform: scale(0.95) translateY(-10px);
   transition: transform 0.2s;
+}
+
+.modal-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.modal-content::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 3px;
+}
+
+.modal-content::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
 }
 
 .modal-header {
@@ -3028,4 +3043,258 @@
   flex: 1;
   font-size: 13px;
   color: #94a3b8;
+}
+
+/* ============================================
+   MCP & Plugin Marketplace Tab Styles
+   ============================================ */
+
+.plugins-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: 8px;
+}
+
+.plugins-tab {
+  padding: 8px 16px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+}
+
+.plugins-tab:hover {
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 6px 6px 0 0;
+}
+
+.plugins-tab.active {
+  color: rgba(74, 200, 232, 1);
+  border-bottom-color: rgba(74, 200, 232, 1);
+}
+
+.plugins-tab-content {
+  display: block;
+}
+
+.plugins-tab-content.hidden {
+  display: none;
+}
+
+/* Plugin/MCP cards */
+.plugins-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.plugins-grid::-webkit-scrollbar {
+  width: 6px;
+}
+
+.plugins-grid::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 3px;
+}
+
+/* Mobile responsive for plugin tabs */
+@media (max-width: 600px) {
+  .plugins-tabs {
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .plugins-tab {
+    text-align: left;
+    border-bottom: none;
+    border-left: 2px solid transparent;
+    padding: 10px 12px;
+  }
+
+  .plugins-tab.active {
+    border-left-color: rgba(74, 200, 232, 1);
+    border-bottom-color: transparent;
+    background: rgba(74, 200, 232, 0.1);
+  }
+
+  .plugins-grid {
+    grid-template-columns: 1fr;
+    max-height: 50vh;
+  }
+}
+
+/* ============================================
+   Zone Creation Modal Responsive Enhancements
+   ============================================ */
+
+/* Better spacing and touch targets on mobile */
+@media (max-width: 600px) {
+  #new-session-modal .modal-content {
+    padding: 20px 16px;
+    max-height: 92vh;
+  }
+
+  #new-session-modal .modal-header h3 {
+    font-size: 18px;
+  }
+
+  .session-type-tabs,
+  .runtime-tabs {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .session-type-tab,
+  .runtime-tab {
+    padding: 12px;
+    text-align: left;
+    border-left: 3px solid transparent;
+  }
+
+  .session-type-tab.active {
+    border-left-color: #4ade80;
+  }
+
+  .session-type-tab[data-type='opencode'].active {
+    border-left-color: #8b5cf6;
+  }
+
+  .runtime-tab.active {
+    border-left-color: rgba(74, 200, 232, 1);
+  }
+
+  /* Hide tooltips on mobile (touch doesn't have hover) */
+  .session-type-tab::after {
+    display: none;
+  }
+
+  /* Show descriptions inline on mobile */
+  .session-type-description {
+    display: block !important;
+    margin-top: 4px;
+    font-size: 11px;
+  }
+
+  /* Better touch targets for form inputs */
+  .modal-field input,
+  .modal-field select {
+    font-size: 16px; /* Prevents iOS zoom */
+    padding: 12px 14px;
+    min-height: 44px; /* iOS recommended touch target */
+  }
+
+  /* Checkbox and toggle improvements */
+  .modal-field input[type='checkbox'] {
+    min-width: 20px;
+    min-height: 20px;
+  }
+
+  /* Better spacing for flag checkboxes */
+  .flags-grid {
+    gap: 12px !important;
+  }
+
+  .flag-item {
+    padding: 12px !important;
+  }
+}
+
+/* Very small phones */
+@media (max-width: 380px) {
+  #new-session-modal .modal-content {
+    padding: 16px 12px;
+    max-height: 95vh;
+  }
+
+  .modal-field label {
+    font-size: 12px;
+  }
+
+  .field-hint {
+    font-size: 10px;
+  }
+}
+
+/* Improved scrolling for long modals */
+#new-session-modal .modal-content {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Ensure modal body scrolls while header/footer stay fixed */
+.modal-scroll-wrapper {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px; /* Space for scrollbar */
+}
+
+.modal-scroll-wrapper::-webkit-scrollbar {
+  width: 6px;
+}
+
+.modal-scroll-wrapper::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 3px;
+}
+
+.modal-scroll-wrapper::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+/* Improved modal footer for buttons */
+.modal-footer {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 600px) {
+  .modal-footer {
+    flex-direction: column-reverse;
+  }
+
+  .modal-footer button {
+    width: 100%;
+    min-height: 44px;
+  }
+}
+
+/* Enhanced tab indicators */
+.session-type-tab,
+.runtime-tab {
+  position: relative;
+  overflow: hidden;
+}
+
+.session-type-tab::before,
+.runtime-tab::before {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: currentColor;
+  transform: scaleX(0);
+  transition: transform 0.2s;
+}
+
+.session-type-tab.active::before,
+.runtime-tab.active::before {
+  transform: scaleX(1);
 }

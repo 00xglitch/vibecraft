@@ -4477,6 +4477,25 @@ function init() {
       if (state.scene) {
         state.scene.setTextTiles(tiles)
       }
+    } else if (message.type === 'agent_message') {
+      // Handle agent-to-agent messages - emit through EventBus for notification handlers
+      const agentMessage = message.payload as import('../shared/types').AgentMessage
+
+      // Build event context for EventBus
+      const agentMessageContext: EventContext = {
+        scene: state.scene,
+        feedManager: state.feedManager,
+        timelineManager: state.timelineManager,
+        soundEnabled: state.soundEnabled,
+        isHistory: false, // Raw messages are always current, not history
+        userAvatar: state.scene?.userAvatar || null,
+        session: null, // No specific session for agent messages
+      }
+
+      eventBus.emit('agent_message', agentMessage, agentMessageContext)
+    } else if (message.type === 'team_created' || message.type === 'team_updated') {
+      // Team events - could show notifications or update UI in the future
+      console.log(`Team event: ${message.type}`, message.payload)
     }
   })
 
@@ -4782,10 +4801,55 @@ function cleanup() {
 }
 
 // ============================================================================
+// Mobile Panel Toggle
+// ============================================================================
+
+function setupMobilePanelToggle() {
+  const toggleBtn = document.getElementById('mobile-panel-toggle')
+  const overlay = document.getElementById('mobile-panel-overlay')
+  const feedPanel = document.getElementById('feed-panel')
+
+  if (!toggleBtn || !overlay || !feedPanel) return
+
+  let isPanelOpen = false
+
+  function togglePanel() {
+    isPanelOpen = !isPanelOpen
+
+    if (isPanelOpen) {
+      feedPanel!.classList.add('mobile-visible')
+      overlay!.classList.add('visible')
+      toggleBtn!.classList.add('panel-open')
+      toggleBtn!.textContent = '×'
+    } else {
+      feedPanel!.classList.remove('mobile-visible')
+      overlay!.classList.remove('visible')
+      toggleBtn!.classList.remove('panel-open')
+      toggleBtn!.textContent = '☰'
+    }
+  }
+
+  toggleBtn!.addEventListener('click', togglePanel)
+  overlay!.addEventListener('click', () => {
+    if (isPanelOpen) togglePanel()
+  })
+
+  // Close panel on Escape key
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && isPanelOpen) {
+      togglePanel()
+    }
+  })
+}
+
+// ============================================================================
 // Start
 // ============================================================================
 
-window.addEventListener('load', init)
+window.addEventListener('load', () => {
+  init()
+  setupMobilePanelToggle()
+})
 window.addEventListener('beforeunload', cleanup)
 
 // Export for debugging

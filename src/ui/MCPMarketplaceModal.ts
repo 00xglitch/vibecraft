@@ -12,6 +12,11 @@
 import { toast } from './Toast'
 import type { ManagedSession } from '../../shared/types'
 
+// API URL (proxied in dev, direct in prod)
+const API_URL = import.meta.env.DEV
+  ? '/api'
+  : `http://localhost:${(window as any).VIBECRAFT_PORT || 4003}`
+
 let modal: HTMLElement | null = null
 let activeTab: 'marketplace' | 'installed' = 'marketplace'
 let servers: MCPServer[] = []
@@ -174,7 +179,7 @@ function switchTab(tab: 'marketplace' | 'installed'): void {
 
 async function fetchServers(): Promise<void> {
   try {
-    const res = await fetch('/api/mcp/servers')
+    const res = await fetch(`${API_URL}/mcp/servers`)
     const data = await res.json()
     servers = data.servers || []
   } catch (err) {
@@ -185,7 +190,7 @@ async function fetchServers(): Promise<void> {
 
 async function fetchInstalled(): Promise<void> {
   try {
-    const res = await fetch('/api/mcp/installed')
+    const res = await fetch(`${API_URL}/mcp/installed`)
     const data = await res.json()
     installedServers = data.servers || []
 
@@ -201,7 +206,7 @@ async function fetchInstalled(): Promise<void> {
 
 async function fetchCategories(): Promise<void> {
   try {
-    const res = await fetch('/api/mcp/categories')
+    const res = await fetch(`${API_URL}/mcp/categories`)
     const data = await res.json()
     categories = data.categories.map((c: { name: string }) => c.name)
   } catch (err) {
@@ -556,7 +561,7 @@ async function installServer(serverId: string): Promise<void> {
   try {
     toast.info(`Installing ${server.name}...`, { duration: 5000 })
 
-    const res = await fetch('/api/mcp/install', {
+    const res = await fetch(`${API_URL}/mcp/install`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ serverId }),
@@ -594,7 +599,7 @@ async function uninstallServer(serverId: string): Promise<void> {
   try {
     toast.info(`Uninstalling ${server.name}...`)
 
-    const res = await fetch('/api/mcp/uninstall', {
+    const res = await fetch(`${API_URL}/mcp/uninstall`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ serverId }),
