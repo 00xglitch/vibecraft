@@ -12,6 +12,7 @@ import { ZONE_THEMES } from '../../shared/types'
 import { HexGrid } from '../utils/HexGrid'
 import { soundManager } from '../audio'
 import { ZoneNotifications, type NotificationOptions } from './ZoneNotifications'
+import { TeamBadges } from './TeamBadges'
 import { StationPanels } from './StationPanels'
 import { drawMode } from '../ui/DrawMode'
 import {
@@ -218,6 +219,9 @@ export class WorkshopScene {
   // Zone notification system (new)
   public zoneNotifications: ZoneNotifications
 
+  // Team badges system
+  public teamBadges: TeamBadges
+
   // Station info panels
   public stationPanels: StationPanels
 
@@ -325,6 +329,9 @@ export class WorkshopScene {
 
     // Initialize zone notification system
     this.zoneNotifications = new ZoneNotifications(this.scene)
+
+    // Initialize team badges system
+    this.teamBadges = new TeamBadges(this.scene)
 
     // Initialize station panels
     this.stationPanels = new StationPanels(this.scene)

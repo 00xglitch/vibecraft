@@ -2,7 +2,7 @@
  * Station Panels
  *
  * Shows recent tool activity history for each workstation.
- * Toggled with P key, hidden by default.
+ * Toggled with P key, visible by default.
  */
 
 import * as THREE from 'three'
@@ -54,7 +54,7 @@ const PANEL_SCALE = 2.5
 export class StationPanels {
   private panels: Map<string, Map<StationType, StationPanel>> = new Map() // zoneId -> stationType -> panel
   private scene: THREE.Scene
-  private visible = false
+  private visible = true // Visible by default
 
   constructor(scene: THREE.Scene) {
     this.scene = scene

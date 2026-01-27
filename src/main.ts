@@ -44,6 +44,7 @@ import { getToolIcon } from './utils/ToolUtils'
 import { AttentionSystem } from './systems/AttentionSystem'
 import { TimelineManager } from './ui/TimelineManager'
 import { FeedManager, formatTokens, formatTimeAgo, escapeHtml } from './ui/FeedManager'
+import { TeamPanel } from './ui/TeamPanel'
 import { ContextMenu, type ContextMenuContext } from './ui/ContextMenu'
 import { setupKeyboardShortcuts, getSessionKeybind } from './ui/KeyboardShortcuts'
 import { setupKeybindSettings, updateVoiceHint } from './ui/KeybindSettings'
@@ -211,6 +212,7 @@ interface AppState {
   attentionSystem: AttentionSystem | null // Manages attention queue and notifications
   timelineManager: TimelineManager | null // Manages icon timeline
   feedManager: FeedManager | null // Manages activity feed
+  teamPanel: TeamPanel | null // Manages teams panel
   soundEnabled: boolean // Whether to play sounds
   hasAutoOverviewed: boolean // Whether we've done initial auto-overview for 2+ sessions
   userChangedCamera: boolean // Whether user has manually changed camera (to avoid overriding)
@@ -241,6 +243,7 @@ const state: AppState = {
   attentionSystem: null, // Initialized in init()
   timelineManager: null, // Initialized in init()
   feedManager: null, // Initialized in init()
+  teamPanel: null, // Initialized in init()
   soundEnabled: true,
   hasAutoOverviewed: false,
   userChangedCamera: false,
@@ -681,6 +684,26 @@ async function fetchServerInfo(): Promise<void> {
     if (cwdEl) {
       cwdEl.textContent = data.cwd
     }
+  }
+}
+
+/**
+ * Fetch teams from server and populate team panel
+ */
+async function fetchTeams(): Promise<void> {
+  try {
+    const response = await fetch('/api/teams')
+    if (!response.ok) {
+      console.error('Failed to fetch teams:', response.statusText)
+      return
+    }
+    const data = await response.json()
+    if (data.ok && data.teams && state.teamPanel) {
+      state.teamPanel.setTeams(data.teams)
+      console.log(`Loaded ${data.teams.length} teams from server`)
+    }
+  } catch (err) {
+    console.error('Error fetching teams:', err)
   }
 }
 
@@ -3923,6 +3946,9 @@ function init() {
   state.feedManager = new FeedManager()
   state.feedManager.setupScrollButton()
 
+  // Initialize team panel
+  state.teamPanel = new TeamPanel()
+
   // Initialize replay controls
   state.replayControls = setupReplayControls({
     onExit: exitReplayMode,
@@ -4387,6 +4413,12 @@ function init() {
     state.managedSessions = sessions
     renderManagedSessions()
 
+    // Update team panel with current sessions
+    if (state.teamPanel) {
+      const sessionsMap = new Map(sessions.map((s) => [s.id, s]))
+      state.teamPanel.setSessions(sessionsMap)
+    }
+
     // One-time toast if archived sessions exist
     const archivedCount = sessions.filter((s) => s.archived).length
     if (archivedCount > 0 && !state.hasSeenArchivedNotice) {
@@ -4494,8 +4526,24 @@ function init() {
 
       eventBus.emit('agent_message', agentMessage, agentMessageContext)
     } else if (message.type === 'team_created' || message.type === 'team_updated') {
-      // Team events - could show notifications or update UI in the future
-      console.log(`Team event: ${message.type}`, message.payload)
+      // Handle team creation/update - update team panel and show badges
+      const team = message.payload as import('../shared/types').Team
+      state.teamPanel?.addTeam(team)
+
+      // Show team badges on zones for each member
+      if (state.scene) {
+        for (const sessionId of team.sessions) {
+          const session = state.managedSessions.find((s) => s.id === sessionId)
+          if (session && session.claudeSessionId) {
+            const zone = state.scene.zones.get(session.claudeSessionId)
+            if (zone) {
+              state.scene.teamBadges.show(session.claudeSessionId, team, sessionId, zone.position)
+            }
+          }
+        }
+      }
+
+      console.log(`Team event: ${message.type}`, team)
     }
   })
 
@@ -4512,6 +4560,9 @@ function init() {
 
   // Fetch server info (cwd, etc.)
   fetchServerInfo()
+
+  // Fetch teams from server
+  fetchTeams()
 
   // Setup keyboard shortcuts
   setupKeyboardShortcuts({

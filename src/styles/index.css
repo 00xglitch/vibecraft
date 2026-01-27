@@ -2,6 +2,7 @@
 
 @import './base.css';
 @import './sessions.css';
+@import './teams.css';
 @import './feed.css';
 @import './prompt.css';
 @import './hud.css';

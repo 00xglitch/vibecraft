@@ -4337,6 +4337,60 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
     return
   }
 
+  // GET /api/teams/:teamId/memory - Get team shared memory
+  const getMemoryMatch = req.url?.match(/^\/api\/teams\/([^/]+)\/memory$/)
+  if (getMemoryMatch && req.method === 'GET') {
+    const teamId = getMemoryMatch[1]
+    const memory = teamManager.getSharedMemory(teamId)
+
+    if (!memory) {
+      res.writeHead(404, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: false, error: 'Team not found' }))
+      return
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ ok: true, memory }))
+    return
+  }
+
+  // POST /api/teams/:teamId/memory - Add to shared memory
+  const addMemoryMatch = req.url?.match(/^\/api\/teams\/([^/]+)\/memory$/)
+  if (addMemoryMatch && req.method === 'POST') {
+    const teamId = addMemoryMatch[1]
+
+    collectRequestBody(req).then((body) => {
+      try {
+        const { sessionId, type, content } = JSON.parse(body)
+
+        if (!sessionId || !type || !content) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: 'sessionId, type, and content are required' }))
+          return
+        }
+
+        teamManager.addToSharedMemory(teamId, sessionId, type, content)
+
+        const memory = teamManager.getSharedMemory(teamId)
+        const team = teamManager.getTeam(teamId)
+        if (team) {
+          broadcast({
+            type: 'team_updated',
+            payload: team,
+          } as ServerMessage)
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, memory }))
+        log(`Added ${type} to team ${teamId} shared memory by ${sessionId.slice(0, 8)}`)
+      } catch (err: any) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: err.message }))
+      }
+    })
+    return
+  }
+
   // ==========================================================================
   // Agent-to-Agent Messaging API
   // ==========================================================================
